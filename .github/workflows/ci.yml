@@ -83,10 +83,27 @@ jobs:
       - name: Text policy
         run: python3 scripts/check_text_policy.py files
 
+  dependency-scan:
+    name: Scan dependency diff
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dependency review
+        if: github.event_name == 'pull_request'
+        uses: ./actions/dependency-review
+
   ci-status:
     name: CI Status
     if: always()
-    needs: [scripts, cmake, static]
+    needs: [scripts, cmake, static, dependency-scan]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -100,3 +117,4 @@ jobs:
         uses: ./actions/ci-status
         with:
           needs: ${{ toJSON(needs) }}
+          expected: '{"dependency-scan": ${{ github.event_name != ''push'' }}}'
