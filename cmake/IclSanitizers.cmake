@@ -49,6 +49,13 @@ if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         endif()
     endforeach()
     add_compile_options(/fsanitize=address /O1 /Zi)
+    # /fsanitize=address enables STL container annotations in our objects. Libraries built
+    # without ASan (vcpkg packages such as Catch2) do not carry them, and the linker rejects
+    # the mix with LNK2038. Disable the annotations so both sides agree.
+    add_compile_definitions(
+        _DISABLE_STRING_ANNOTATION
+        _DISABLE_VECTOR_ANNOTATION
+        _DISABLE_OPTIONAL_ANNOTATION)
     # /fsanitize=address is incompatible with /RTC and incremental linking.
     add_link_options(/INCREMENTAL:NO)
     string(REGEX REPLACE "/RTC[1csu]+" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
