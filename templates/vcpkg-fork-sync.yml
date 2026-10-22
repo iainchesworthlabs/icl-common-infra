@@ -1,11 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Belongs in iainchesworthlabs/vcpkg at .github/workflows/sync-upstream.yml.
+# Belongs in iainchesworthlabs/vcpkg at .github/workflows/sync-upstream.yml, on the fork's
+# default branch `icl-sync`.
 #
-# Keeps the fork's master level with microsoft/vcpkg so that every upstream commit a
-# Dependabot baseline bump can name exists in the fork (the `vcpkg-baseline-in-fork`
-# policy check fails a pull request until it does). Custom ports live on their own
-# branch or in an overlay directory, never on master, so the sync is a fast-forward.
+# `master` in the fork stays an exact copy of microsoft/vcpkg master, so that every upstream
+# commit a Dependabot baseline bump can name is reachable from it (the `vcpkg-baseline-in-fork`
+# policy check fails a pull request until it is). A scheduled workflow runs from the default
+# branch, so the workflow lives on `icl-sync` and keeps `master` free of local commits.
+# Custom ports live on their own branches or in an overlay directory, never on master.
+#
+# The sync is GitHub's server-side fork sync (a fast-forward). It fails when master has a
+# local commit, which is the signal to remove that commit. When upstream changes a file under
+# .github/workflows, GitHub may refuse the update for the Actions token; then store a
+# personal access token with the `workflow` scope as the repository secret SYNC_TOKEN.
 name: Sync upstream
 
 on:
@@ -18,21 +25,11 @@ permissions: {}
 jobs:
   sync:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - name: Check out
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
       - name: Fast-forward master from upstream
-        shell: bash
-        run: |
-          set -euo pipefail
-          git remote add upstream https://github.com/microsoft/vcpkg.git
-          git fetch --no-tags upstream master
-          git merge --ff-only upstream/master
-          git push origin HEAD:master
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/merge-upstream" -f branch=master
