@@ -1,0 +1,61 @@
+name: Policy
+
+# Reusable. The static checks that need no build. Callers run it on pull requests
+# (drafts included), on merge_group, and on pushes where wanted.
+
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: Base ref to diff against. Empty uses the pull request base or the merge group base.
+        type: string
+        default: ""
+      runner:
+        description: JSON array of runner labels.
+        type: string
+        default: '["ubuntu-24.04"]'
+      skip-changelog:
+        type: string
+        default: "false"
+
+permissions: {}
+
+jobs:
+  policy:
+    name: Policy
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Work out the base
+        id: base
+        shell: bash
+        env:
+          INPUT_BASE: ${{ inputs.base-ref }}
+          PR_BASE: ${{ github.base_ref }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_BASE" ]; then ref="$INPUT_BASE"
+          elif [ -n "$MQ_BASE" ]; then ref="$MQ_BASE"
+          elif [ -n "$PR_BASE" ]; then git fetch --no-tags origin "$PR_BASE"; ref="origin/$PR_BASE"
+          else git fetch --no-tags origin develop; ref="origin/develop"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Policy checks
+        uses: $/actions/policy-checks
+        with:
+          base-ref: ${{ steps.base.outputs.ref }}
+          branch-name: ${{ github.head_ref }}
+          pr-title: ${{ github.event.pull_request.title }}
+          pr-body: ${{ github.event.pull_request.body }}
+          no-changelog: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+          skip-changelog: ${{ inputs.skip-changelog == 'true' || startsWith(github.head_ref, 'dependabot/') || startsWith(github.head_ref, 'release/') || github.event_name == 'merge_group' }}

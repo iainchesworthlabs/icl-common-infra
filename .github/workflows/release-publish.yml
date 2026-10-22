@@ -1,0 +1,223 @@
+name: Release publish
+
+# Reusable. The project-independent half of a release. The caller's own release workflow
+# builds and platform-signs the packages first and uploads them as workflow artifacts
+# whose names start with `release-`; this workflow then:
+#
+#   verify    the tag is semver and points at a commit on develop
+#   publish   SHA-512 sums, detached GPG signatures, SPDX SBOM, build-provenance
+#             attestations, GitHub Release (pre-release when the tag has a suffix)
+#   promote   fast-forwards `main` to the tag with the release bot, for final releases
+#
+# The publish job runs in the `release` environment, so the owner approves each release.
+# Missing secrets fail the run early with a message listing which are missing.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-pattern:
+        description: Name pattern of the workflow artifacts that hold the packages.
+        type: string
+        default: "release-*"
+      default-branch:
+        type: string
+        default: develop
+      release-branch:
+        type: string
+        default: main
+    secrets:
+      REPO_GPG_PRIVATE_KEY:
+        required: false
+      REPO_GPG_PASSPHRASE:
+        required: false
+      RELEASE_BOT_APP_ID:
+        required: false
+      RELEASE_BOT_PRIVATE_KEY:
+        required: false
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Verify tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the tag
+        id: check
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "::error::tag '$TAG' is not vMAJOR.MINOR.PATCH[-suffix]"
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::$TAG does not point at a commit on $DEFAULT_BRANCH"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+
+  publish:
+    name: Sign and publish
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check secrets
+        shell: bash
+        env:
+          GPG_KEY: ${{ secrets.REPO_GPG_PRIVATE_KEY }}
+          GPG_PASS: ${{ secrets.REPO_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          missing=()
+          if [ -z "$GPG_KEY" ]; then missing+=(REPO_GPG_PRIVATE_KEY); fi
+          if [ -z "$GPG_PASS" ]; then missing+=(REPO_GPG_PASSPHRASE); fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::missing organisation secrets: ${missing[*]}. See docs/releasing.md."
+            exit 1
+          fi
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ inputs.artifact-pattern }}
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        shell: bash
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          test -n "$(ls -A .)" || { echo "::error::no packages were uploaded"; exit 1; }
+          find . -maxdepth 1 -type f ! -name 'SHA512SUMS*' ! -name '*.asc' -printf '%f\n' | LC_ALL=C sort \
+            | xargs sha512sum > SHA512SUMS
+          cat SHA512SUMS
+
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Sign with GPG
+        shell: bash
+        env:
+          GPG_KEY: ${{ secrets.REPO_GPG_PRIVATE_KEY }}
+          GPG_PASS: ${{ secrets.REPO_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s' "$GPG_KEY" | gpg --batch --quiet --import
+          fpr="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
+          echo "Signing with key $fpr"
+          cd dist
+          find . -maxdepth 1 -type f ! -name '*.asc' -printf '%f\n' | while IFS= read -r f; do
+            printf '%s' "$GPG_PASS" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --armor --detach-sign --local-user "$fpr" --output "$f.asc" "$f"
+          done
+          gpg --batch --verify SHA512SUMS.asc SHA512SUMS
+          rm -rf "$GNUPGHOME"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*
+            !dist/*.asc
+
+      - name: Release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -f CHANGELOG.md ] && grep -q "^## \[$VERSION\]" CHANGELOG.md; then
+            python3 - <<'PY' > "$RUNNER_TEMP/notes.md"
+          import os, re, sys
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          v = re.escape(os.environ["VERSION"])
+          m = re.search(rf"^## \[{v}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.M | re.S)
+          sys.stdout.write(m.group(1).strip() + "\n")
+          PY
+          else
+            echo "Release $VERSION" > "$RUNNER_TEMP/notes.md"
+          fi
+
+      - name: Create the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          flags=(--verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md")
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" dist/* "${flags[@]}"
+
+  promote:
+    name: Fast-forward release branch
+    needs: [verify, publish]
+    if: needs.verify.outputs.prerelease == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Create a token for the release bot
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Fast-forward
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ inputs.release-branch }}
+        run: |
+          set -euo pipefail
+          # A push made with an App token starts workflows (the docs deploy is triggered
+          # by it); one made with GITHUB_TOKEN would not.
+          if gh api "repos/$REPO/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$REPO/git/refs/heads/$BRANCH" -f sha="$GITHUB_SHA" -F force=false
+          else
+            gh api --method POST "repos/$REPO/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$GITHUB_SHA"
+          fi
+          echo "$BRANCH is now at $GITHUB_SHA"

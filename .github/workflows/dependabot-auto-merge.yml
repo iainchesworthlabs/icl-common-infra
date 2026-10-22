@@ -1,0 +1,57 @@
+name: Dependabot auto-merge
+
+# Reusable. Enables auto-merge on Dependabot pull requests for non-major updates of GitHub
+# Actions and CI tooling. GitHub then queues the pull request once the required checks pass.
+# vcpkg and submodule updates and every major update are left for a person.
+#
+# The token that sets the auto-merge bit has to be a person's. The Actions GITHUB_TOKEN can
+# set the bit, but GitHub does not take the pull request into the merge queue on its
+# strength, and a bit set that way is not replaced by a later run (iclforge hit this: nine
+# green Dependabot pull requests sat unmerged for days). So this workflow needs the secret
+# MERGE_QUEUE_TOKEN, a fine-grained personal access token with Contents and Pull requests
+# read and write on the repositories, stored as a *Dependabot* secret (a Dependabot-triggered
+# run reads that store, not the Actions one). Without it the job fails with a message and
+# sets nothing. The Actions token is never a fallback.
+
+on:
+  workflow_call:
+    secrets:
+      MERGE_QUEUE_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Read the update
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Enable auto-merge
+        if: >-
+          steps.meta.outputs.update-type != 'version-update:semver-major'
+          && (steps.meta.outputs.package-ecosystem == 'github_actions'
+              || steps.meta.outputs.package-ecosystem == 'pip'
+              || steps.meta.outputs.package-ecosystem == 'npm_and_yarn')
+        shell: bash
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$MERGE_QUEUE_TOKEN" ]; then
+            echo "::error title=MERGE_QUEUE_TOKEN is not set::Auto-merge was not enabled. Add MERGE_QUEUE_TOKEN as a Dependabot secret (see docs/releasing.md), then re-run this job."
+            exit 1
+          fi
+          export GH_TOKEN="$MERGE_QUEUE_TOKEN"
+          gh pr merge --auto --squash "$PR_URL"

@@ -1,0 +1,102 @@
+name: CI
+
+# This repository's own checks. It does not call its own reusable workflows from here; the
+# template repository does that, and a break shows up there first. What runs here is the
+# unit tests of the scripts, the CMake module smoke tests, and static analysis of the
+# workflows and actions.
+
+on:
+  pull_request:
+    branches: [develop]
+  merge_group:
+  push:
+    branches: [develop]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scripts:
+    name: Script tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Run the tests
+        run: python3 -m unittest discover -s scripts/tests -v
+
+  cmake:
+    name: CMake module tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the tests
+        run: bash tests/cmake/run_tests.sh
+
+  static:
+    name: Static analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the tools
+        run: python3 -m pip install --quiet actionlint-py==1.7.12.25 zizmor==1.31.1 shellcheck-py==0.11.0.1 reuse==6.2.0
+      - name: Action pinning
+        run: python3 scripts/check_action_pinning.py
+      - name: actionlint
+        run: actionlint
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --min-severity medium --format plain .
+      - name: shellcheck
+        run: git ls-files '*.sh' | xargs shellcheck
+      - name: REUSE
+        run: reuse lint
+      - name: Text policy
+        run: python3 scripts/check_text_policy.py files
+
+  ci-status:
+    name: CI Status
+    if: always()
+    needs: [scripts, cmake, static]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Aggregate
+        uses: ./actions/ci-status
+        with:
+          needs: ${{ toJSON(needs) }}

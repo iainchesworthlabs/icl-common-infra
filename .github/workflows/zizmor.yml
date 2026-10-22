@@ -1,0 +1,43 @@
+name: zizmor
+
+# Reusable. Static analysis of the repository's workflows and actions (template injection,
+# unpinned actions, excessive permissions, credential persistence). Findings go to code
+# scanning when the repository has it; the job also fails on findings of medium severity
+# and above.
+
+on:
+  workflow_call:
+    inputs:
+      min-severity:
+        type: string
+        default: medium
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Run zizmor
+        shell: bash
+        env:
+          MIN_SEVERITY: ${{ inputs.min-severity }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet "zizmor==1.31.1"
+          zizmor --min-severity "$MIN_SEVERITY" --format plain .

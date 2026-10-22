@@ -1,0 +1,83 @@
+name: CodeQL
+
+# Reusable. Code scanning for the languages the caller lists. The caller schedules it
+# nightly (and on workflow_dispatch); it has no pull request trigger, so a finding never
+# blocks a merge and a required check cannot be left waiting by a path filter. A failed
+# analysis opens or updates one `nightly-analysis` issue.
+#
+# `languages` is a JSON array of {language, build_mode, preset, toolchain_script, vcpkg}:
+#   language          cpp, python, javascript-typescript, java-kotlin, ...
+#   build_mode        none or manual (cpp is manual)
+#   preset            for manual cpp: the CMake preset to configure and build
+#   toolchain_script  repository path of a script that installs the compiler
+#   vcpkg             true to set up vcpkg before the build
+
+on:
+  workflow_call:
+    inputs:
+      languages:
+        type: string
+        required: true
+      runner:
+        type: string
+        default: '["ubuntu-24.04"]'
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 90
+    permissions:
+      security-events: write
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the compiler
+        if: matrix.toolchain_script != ''
+        shell: bash
+        env:
+          SCRIPT: ${{ matrix.toolchain_script }}
+        run: bash "$SCRIPT"
+
+      - name: Set up vcpkg
+        if: matrix.vcpkg == true
+        uses: $/actions/setup-vcpkg
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode || 'none' }}
+
+      - name: Build
+        if: matrix.build_mode == 'manual' && matrix.preset != ''
+        shell: bash
+        env:
+          PRESET: ${{ matrix.preset }}
+        run: |
+          set -euo pipefail
+          cmake --preset "$PRESET"
+          cmake --build --preset "$PRESET"
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}
+
+      - name: Report the failure
+        if: failure() && github.event_name != 'pull_request'
+        uses: $/actions/report-nightly-failure
+        with:
+          engine: CodeQL (${{ matrix.language }})
+          detail: The CodeQL analysis failed to build or to complete. Open the run, fix the build or the finding, or dismiss the alert in Security > Code scanning with a justification.
