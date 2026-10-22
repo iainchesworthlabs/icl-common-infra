@@ -1,0 +1,66 @@
+name: Setup ccache
+description: >-
+  Install ccache, restore its cache, and point CMake at it through
+  CMAKE_C_COMPILER_LAUNCHER and CMAKE_CXX_COMPILER_LAUNCHER (CMake reads these
+  environment variables as the initial value of the cache variables). Save the cache
+  at the end of the job with actions/cache/save, `if: always()`, using the key this
+  action exports as CCACHE_SAVE_KEY. MSVC builds with /Z7 (embedded debug info) or
+  the compiler does not cache; presets for MSVC must set CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded.
+
+inputs:
+  key:
+    description: Cache lineage, for example the leg name. Entries are keyed by lineage and commit.
+    required: true
+  max-size:
+    description: Upper bound for the cache directory.
+    default: 600M
+
+runs:
+  using: composite
+  steps:
+    - name: Install ccache
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v ccache >/dev/null 2>&1; then exit 0; fi
+        case "$RUNNER_OS" in
+          Linux)   sudo apt-get update -qq && sudo apt-get install -y -qq ccache ;;
+          macOS)   brew install ccache ;;
+          Windows) choco install ccache -y --no-progress ;;
+        esac
+
+    - name: Configure ccache
+      id: cfg
+      shell: bash
+      env:
+        MAX_SIZE: ${{ inputs.max-size }}
+        LINEAGE: ${{ inputs.key }}
+      run: | # zizmor: ignore[github-env] values are runner-assigned paths and fixed settings
+        set -euo pipefail
+        dir="$RUNNER_TEMP/ccache"
+        mkdir -p "$dir"
+        if command -v cygpath >/dev/null 2>&1; then dir="$(cygpath -m "$dir")"; fi
+        {
+          echo "CCACHE_DIR=$dir"
+          echo "CCACHE_MAXSIZE=$MAX_SIZE"
+          echo "CCACHE_COMPRESS=1"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+        } >> "$GITHUB_ENV"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "prefix=ccache-$RUNNER_OS-$RUNNER_ARCH-$LINEAGE-" >> "$GITHUB_OUTPUT"
+
+    - name: Restore ccache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.cfg.outputs.dir }}
+        key: ${{ steps.cfg.outputs.prefix }}${{ github.sha }}
+        restore-keys: |
+          ${{ steps.cfg.outputs.prefix }}
+
+    - name: Export the save key
+      shell: bash
+      env:
+        PREFIX: ${{ steps.cfg.outputs.prefix }}
+      run: | # zizmor: ignore[github-env] runner OS, arch, lineage and commit SHA only
+        echo "CCACHE_SAVE_KEY=${PREFIX}${GITHUB_SHA}" >> "$GITHUB_ENV"

@@ -1,0 +1,43 @@
+name: Setup Emscripten
+description: >-
+  Clone and activate a pinned Emscripten SDK, exporting EMSDK and its bin
+  directories to GITHUB_ENV and GITHUB_PATH for later steps. The emsdk manager
+  repository is pinned by commit as well as the SDK by version, because the
+  manager is third-party code that runs before the version argument is read.
+  To bump both, resolve the tag with
+  `git ls-remote --tags https://github.com/emscripten-core/emsdk.git`.
+
+inputs:
+  emsdk-version:
+    description: Emscripten SDK release to install and activate.
+    default: "6.0.6"
+  emsdk-repo-commit:
+    description: Commit of the emsdk manager repository that matches the release tag.
+    default: "9981799f744be74ac67b1c1813ff172f63be0630"
+
+runs:
+  using: composite
+  steps:
+    # The values written to GITHUB_ENV and GITHUB_PATH are this step's own working
+    # directory after a checkout of a pinned commit. They are not derived from
+    # anything a pull request controls. The environment has to persist across
+    # steps so that emcc and em++ are on PATH for the build, which only GITHUB_ENV
+    # and GITHUB_PATH can do.
+    - name: Install Emscripten
+      shell: bash
+      env:
+        EMSDK_VERSION: ${{ inputs.emsdk-version }}
+        EMSDK_REPO_COMMIT: ${{ inputs.emsdk-repo-commit }}
+      run: | # zizmor: ignore[github-env] pinned inputs and a runner-assigned directory
+        set -euo pipefail
+        emsdk_dir="$RUNNER_TEMP/emsdk"
+        git init --quiet "$emsdk_dir"
+        cd "$emsdk_dir"
+        git remote add origin https://github.com/emscripten-core/emsdk.git
+        git fetch --depth 1 origin "$EMSDK_REPO_COMMIT"
+        git checkout --quiet FETCH_HEAD
+        ./emsdk install "$EMSDK_VERSION"
+        ./emsdk activate "$EMSDK_VERSION"
+        echo "EMSDK=$PWD" >> "$GITHUB_ENV"
+        echo "$PWD" >> "$GITHUB_PATH"
+        echo "$PWD/upstream/emscripten" >> "$GITHUB_PATH"

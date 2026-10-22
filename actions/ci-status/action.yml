@@ -1,0 +1,29 @@
+name: CI status
+description: >-
+  The aggregator behind the one required status check. Pass toJSON(needs) and, when a
+  planner decides scope, a map of job id to whether the plan asked for it. A failed or
+  cancelled job fails the check, and so does a skipped job the plan asked for.
+
+inputs:
+  needs:
+    description: toJSON(needs) of the aggregating job.
+    required: true
+  expected:
+    description: 'JSON object mapping job id to true or false. Jobs not listed are expected to run.'
+    default: "{}"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Evaluate
+      shell: bash
+      env:
+        SCRIPT: ${{ github.action_path }}/../../scripts/check_needs.py
+        NEEDS: ${{ inputs.needs }}
+        EXPECTED: ${{ inputs.expected }}
+      run: python3 "$SCRIPT" --needs "$NEEDS" --expected "$EXPECTED"

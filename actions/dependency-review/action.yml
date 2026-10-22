@@ -1,0 +1,24 @@
+name: Dependency review
+description: >-
+  Diffs the dependency graph of a pull request or merge-queue entry (GitHub Actions
+  and the vcpkg manifest) and fails on a moderate-or-worse known vulnerability that the
+  change introduces. Call it from a job named exactly `Scan dependency diff`, because that
+  is the required status check name. The job needs `contents: read` and, to comment on a
+  failure, `pull-requests: write`.
+
+inputs:
+  fail-on-severity:
+    default: moderate
+  allow-ghsas:
+    description: Newline-separated advisory ids to accept, each justified in a comment at the call site.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Dependency review
+      uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      with:
+        fail-on-severity: ${{ inputs.fail-on-severity }}
+        comment-summary-in-pr: on-failure
+        allow-ghsas: ${{ inputs.allow-ghsas }}

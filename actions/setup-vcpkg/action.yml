@@ -1,0 +1,196 @@
+name: Setup vcpkg
+description: >-
+  Clone the organisation's vcpkg fork, check out the commit that vcpkg.json names
+  as its builtin-baseline, bootstrap it, export VCPKG_ROOT, and restore the
+  binary and download caches. Pair it with save-vcpkg-cache as the last step of
+  the job.
+
+inputs:
+  vcpkg-commit:
+    description: >-
+      vcpkg commit to check out. Default: the builtin-baseline in vcpkg.json,
+      so the checkout always matches what the manifest resolves against.
+    default: ""
+  fork-url:
+    description: The vcpkg repository to clone. The organisation's fork carries the custom ports.
+    default: https://github.com/iainchesworthlabs/vcpkg.git
+  cache-key-suffix:
+    description: >-
+      Names the cache lineage of a job whose install set differs from the
+      default manifest's (pass the manifest features the job enables). Jobs
+      with the default set pass nothing and share the "core" lineage. Entries
+      are saved under a key that ends in a hash of their content, and a restore
+      takes the newest entry of its own lineage, so two jobs with different
+      sets must not share one.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # A full clone: manifest mode with no builtin-baseline resolves the baseline
+    # from the checkout's history, which a --depth 1 clone does not have. Then
+    # reset to the pin so a rebuild months from now installs the same Catch2.
+    - name: Clone and bootstrap vcpkg
+      shell: bash
+      # inputs.vcpkg-commit read through env: rather than interpolated
+      # straight into the script text - every caller today passes a literal
+      # SHA, but a value substituted directly into a run: block is shell CODE,
+      # not data, so this closes that off rather than relying on every future
+      # caller staying literal (zizmor: template-injection).
+      #
+      # zizmor's github-env audit also flags both `echo VCPKG_ROOT=... >>
+      # $GITHUB_ENV` writes below: it can't statically tell a safe dynamic
+      # value from an attacker-controlled one, so it flags every non-literal
+      # write on principle. $VCPKG_DIR here is built from $RUNNER_TEMP (a
+      # runner-assigned path) plus the literal suffix "/vcpkg" - nothing in it
+      # comes from a PR title, branch name, issue body or other
+      # attacker-reachable string, on this or any workflow that calls this
+      # composite action. VCPKG_ROOT has to be a real environment variable
+      # for CMake's vcpkg toolchain file to pick it up automatically in every
+      # later step across every job that uses this action - threading it
+      # through $GITHUB_OUTPUT instead would mean every one of those steps
+      # re-exporting it by hand, for no real safety gain here.
+      env:
+        VCPKG_COMMIT: ${{ inputs.vcpkg-commit }}
+        FORK_URL: ${{ inputs.fork-url }}
+      run: | # zizmor: ignore[github-env] VCPKG_ROOT is RUNNER_TEMP-derived, not attacker-influenced - see above
+        set -euo pipefail
+        if [ -z "$VCPKG_COMMIT" ]; then
+          VCPKG_COMMIT="$(python3 -c "import json; print(json.load(open('vcpkg.json'))['builtin-baseline'])")"
+          echo "VCPKG_BASELINE_COMMIT=$VCPKG_COMMIT" >> "$GITHUB_ENV"
+        fi
+        VCPKG_DIR="${RUNNER_TEMP}/vcpkg"
+        if [ ! -d "$VCPKG_DIR/.git" ]; then
+          git clone "$FORK_URL" "$VCPKG_DIR"
+        fi
+        git -C "$VCPKG_DIR" fetch --tags origin
+        git -C "$VCPKG_DIR" checkout --force "$VCPKG_COMMIT"
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          "$VCPKG_DIR/bootstrap-vcpkg.bat" -disableMetrics
+          echo "VCPKG_ROOT=$(cygpath -w "$VCPKG_DIR")" >> "$GITHUB_ENV"
+        else
+          "$VCPKG_DIR/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$VCPKG_DIR" >> "$GITHUB_ENV"
+        fi
+
+    # vcpkg rejects an MSYS-style path (/c/...) for these, so hand it a native
+    # Windows path. The cache action below still needs the bash-style path,
+    # hence the two forms.
+    #
+    # Same github-env reasoning as the step above: BINARY_DIR/DOWNLOADS_DIR
+    # are $HOME plus literal suffixes, optionally reshaped by cygpath - never
+    # attacker-influenced. VCPKG_DEFAULT_BINARY_CACHE/VCPKG_DOWNLOADS are
+    # vcpkg's own env-var configuration knobs, read implicitly by every vcpkg
+    # invocation in later steps.
+    - name: Set up vcpkg cache directories
+      shell: bash
+      run: | # zizmor: ignore[github-env] BINARY_DIR/DOWNLOADS_DIR are $HOME-derived, not attacker-influenced - see above
+        set -euo pipefail
+        BINARY_DIR="$HOME/.cache/vcpkg/archives"
+        DOWNLOADS_DIR="$HOME/.cache/vcpkg/downloads"
+        mkdir -p "$BINARY_DIR" "$DOWNLOADS_DIR"
+        if command -v cygpath >/dev/null 2>&1; then
+          BINARY_DIR=$(cygpath -w "$BINARY_DIR")
+          DOWNLOADS_DIR=$(cygpath -w "$DOWNLOADS_DIR")
+        fi
+        echo "VCPKG_DEFAULT_BINARY_CACHE=$BINARY_DIR" >> "$GITHUB_ENV"
+        echo "VCPKG_DOWNLOADS=$DOWNLOADS_DIR" >> "$GITHUB_ENV"
+        echo "VCPKG_BINARY_SOURCES=clear;default,readwrite" >> "$GITHUB_ENV"
+
+    # The binary and download caches, restored here and saved by the caller's
+    # last step (../save-vcpkg-cache, `if: always()`). actions/cache's own
+    # post-job save runs only when the job succeeds, so a job that built
+    # twenty packages and then failed - a flaky download, a test, a timeout -
+    # threw all of them away and the next attempt started from nothing.
+    #
+    # Keyed by OS + arch + the vcpkg pin + the manifest, then the lineage (the
+    # cache-key-suffix, or "core"). The compiler is deliberately NOT in the
+    # key: the two Linux legs (gcc, clang) and the two Windows legs (cl,
+    # clang-cl) build the same x64-linux / x64-windows triplet, so they share
+    # one cache instead of duplicating it. vcpkg names archives by ABI hash,
+    # so entries for different triplets coexist safely anyway. runner.arch is
+    # in the key since the arm64 Linux legs came up: without it an arm64
+    # runner's fallback could match a cache an x64 runner populated and hand
+    # vcpkg the wrong architecture's previously-downloaded tool binaries.
+    #
+    # `key` is never an exact hit: a save is named after what is in the
+    # directory, so every restore falls through to restore-keys, which GitHub
+    # resolves to the most recently created entry with that prefix - first the
+    # lineage's own, then (so a lineage's first run is not cold) any lineage of
+    # the same manifest, the same vcpkg pin, and finally the same OS and arch.
+    - name: Work out the vcpkg cache keys
+      id: keys
+      shell: bash
+      env:
+        VCPKG_COMMIT: ${{ inputs.vcpkg-commit != '' && inputs.vcpkg-commit || env.VCPKG_BASELINE_COMMIT }}
+        MANIFEST_HASH: ${{ hashFiles('vcpkg.json') }}
+        LINEAGE: ${{ inputs.cache-key-suffix != '' && inputs.cache-key-suffix || 'core' }}
+      run: |
+        set -euo pipefail
+        for kind in binaries downloads; do
+          if [ "$kind" = binaries ]; then prefix=vcpkg; else prefix=vcpkg-downloads; fi
+          any="$prefix-$RUNNER_OS-$RUNNER_ARCH-"
+          commit="$any$VCPKG_COMMIT-"
+          manifest="$commit$MANIFEST_HASH"
+          {
+            echo "${kind}_lineage=$manifest-$LINEAGE"
+            echo "${kind}_manifest=$manifest"
+            echo "${kind}_commit=$commit"
+            echo "${kind}_any=$any"
+          } >> "$GITHUB_OUTPUT"
+        done
+
+    - name: Restore vcpkg binaries
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/vcpkg/archives
+        key: ${{ steps.keys.outputs.binaries_lineage }}-restore
+        restore-keys: |
+          ${{ steps.keys.outputs.binaries_lineage }}-
+          ${{ steps.keys.outputs.binaries_manifest }}
+          ${{ steps.keys.outputs.binaries_commit }}
+          ${{ steps.keys.outputs.binaries_any }}
+
+    - name: Restore vcpkg downloads
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/vcpkg/downloads
+        key: ${{ steps.keys.outputs.downloads_lineage }}-restore
+        restore-keys: |
+          ${{ steps.keys.outputs.downloads_lineage }}-
+          ${{ steps.keys.outputs.downloads_manifest }}
+          ${{ steps.keys.outputs.downloads_commit }}
+          ${{ steps.keys.outputs.downloads_any }}
+
+    # What was restored, and the keys to save under, handed to ../save-vcpkg-cache
+    # through the environment so a caller needs no inputs. Same github-env
+    # reasoning as the steps above: the values are the runner-assigned OS and
+    # arch, the pinned vcpkg commit, a hash and the lineage - never anything a
+    # pull request title, branch name or other attacker-reachable string
+    # reaches - and later steps read them as plain environment variables.
+    - name: Record what was restored
+      shell: bash
+      env:
+        BINARIES_KEY: ${{ steps.keys.outputs.binaries_lineage }}
+        DOWNLOADS_KEY: ${{ steps.keys.outputs.downloads_lineage }}
+      run: | # zizmor: ignore[github-env] runner OS/arch, pinned commit, manifest hash and a fixed lineage name - see above
+        set -euo pipefail
+        # The same definition of "what is in the cache" as ../save-vcpkg-cache.
+        names_of() {
+          local kind="$1" dir="$2" f
+          if [ "$kind" = binaries ]; then
+            (cd "$dir" && LC_ALL=C ls -R . | grep -E '\.zip$|:$' || true)
+          else
+            for f in "$dir"/*; do
+              if [ -f "$f" ]; then echo "${f##*/}"; fi
+            done | LC_ALL=C sort
+          fi
+        }
+        listing() { names_of "$1" "$2" | sha256sum | cut -c1-16; }
+        {
+          echo "VCPKG_CACHE_BINARIES_KEY=$BINARIES_KEY"
+          echo "VCPKG_CACHE_BINARIES_LISTING=$(listing binaries "$HOME/.cache/vcpkg/archives")"
+          echo "VCPKG_CACHE_DOWNLOADS_KEY=$DOWNLOADS_KEY"
+          echo "VCPKG_CACHE_DOWNLOADS_LISTING=$(listing downloads "$HOME/.cache/vcpkg/downloads")"
+        } >> "$GITHUB_ENV"
+        echo "vcpkg cache: restored $(LC_ALL=C ls -R "$HOME/.cache/vcpkg/archives" | grep -c '\.zip$' || true) archive(s)"

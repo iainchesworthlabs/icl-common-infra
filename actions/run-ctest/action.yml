@@ -1,0 +1,39 @@
+name: Run CTest in phases
+description: >-
+  Runs scripts/run_ctest.py: Catch2 and integration tests in parallel, Qt Quick suites in
+  a phase of their own at limited parallelism, performance guards alone and last. A
+  failed phase is re-run once by name; a pass after a failure is reported as a flaky
+  warning. See the script header for the exact rules. Writes to the job summary.
+
+inputs:
+  build-dir:
+    description: CMake build directory.
+    required: true
+  config:
+    description: Multi-config configuration to test (Release, Debug). Empty for single-config generators.
+    default: ""
+  phases-file:
+    description: Optional JSON file that replaces the default phases.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Run tests
+      shell: bash
+      env:
+        SCRIPT: ${{ github.action_path }}/../../scripts/run_ctest.py
+        BUILD_DIR: ${{ inputs.build-dir }}
+        CONFIG: ${{ inputs.config }}
+        PHASES: ${{ inputs.phases-file }}
+      run: |
+        set -euo pipefail
+        args=(--build-dir "$BUILD_DIR" --summary "$GITHUB_STEP_SUMMARY")
+        if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
+        if [ -n "$PHASES" ]; then args+=(--phases "$PHASES"); fi
+        python3 "$SCRIPT" "${args[@]}"

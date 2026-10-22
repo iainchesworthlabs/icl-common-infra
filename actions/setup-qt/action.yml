@@ -1,0 +1,43 @@
+name: Setup Qt
+description: >-
+  Install a prebuilt Qt kit with aqtinstall (through jurplel/install-qt-action)
+  and export QT_ROOT_DIR, which cmake/FindQt6.cmake reads. Qt is never a vcpkg
+  dependency.
+
+inputs:
+  version:
+    description: Qt version, for example 6.12.0. Callers read it from .github/toolchain-versions.json.
+    required: true
+  modules:
+    description: Space-separated Qt add-on modules, for example "qtquick3d qtshadertools".
+    default: ""
+  aqtsource:
+    description: >-
+      Optional aqtinstall source (pip requirement) used instead of the PyPI
+      release. Needed on Windows for Qt 6.11 and later until a release newer
+      than aqtinstall 3.3.0 exists. Callers read it from
+      .github/toolchain-versions.json and pass it for Windows only.
+    default: ""
+  target:
+    description: aqtinstall target, desktop (default), android, ios or wasm.
+    default: desktop
+  arch:
+    description: aqtinstall architecture. Empty lets the action choose the host default.
+    default: ""
+  host:
+    description: aqtinstall host (linux, mac, windows). Empty means the runner's own.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Qt
+      uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+      with:
+        version: ${{ inputs.version }}
+        modules: ${{ inputs.modules }}
+        aqtsource: ${{ inputs.aqtsource }}
+        target: ${{ inputs.target }}
+        arch: ${{ inputs.arch }}
+        host: ${{ inputs.host }}
+        cache: true

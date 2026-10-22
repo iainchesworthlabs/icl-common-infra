@@ -1,0 +1,98 @@
+name: Sign Windows artefacts
+description: >-
+  Authenticode signing behind the SIGN_WINDOWS switch, with three modes.
+
+    false       no signing; each file is renamed NAME-unsigned.EXT
+    test        sign with a leaf certificate issued by the owner's personal CA, add an
+                RFC 3161 timestamp, rename to NAME-testsigned.EXT. Such builds are
+                trusted only on machines that have the CA root installed
+                (docs/test-signing.md) and must be attached to pre-releases or
+                workflow artifacts only, never to a final release
+    production  reserved for the signing service chosen later; fails until configured
+
+  Only the leaf certificate and its key (PFX) reach CI. The CA's own key never does.
+  Run on a Windows runner.
+
+inputs:
+  mode:
+    description: false, test or production. Callers pass the SIGN_WINDOWS repository variable.
+    default: "false"
+  files:
+    description: Newline-separated paths of the .exe, .dll, .msi or .msix files to process.
+    required: true
+  pfx-base64:
+    description: Base64 of the leaf PFX (secret WIN_TESTSIGN_PFX_BASE64). Needed for test mode.
+    default: ""
+  pfx-password:
+    description: Password of the PFX (secret WIN_TESTSIGN_PFX_PASSWORD). Needed for test mode.
+    default: ""
+  timestamp-url:
+    description: RFC 3161 timestamp server.
+    default: http://timestamp.digicert.com
+
+outputs:
+  files:
+    description: Newline-separated paths of the resulting files, after renaming.
+    value: ${{ steps.sign.outputs.files }}
+
+runs:
+  using: composite
+  steps:
+    - name: Sign
+      id: sign
+      shell: pwsh
+      env:
+        MODE: ${{ inputs.mode }}
+        FILES: ${{ inputs.files }}
+        PFX_B64: ${{ inputs.pfx-base64 }}
+        PFX_PASSWORD: ${{ inputs.pfx-password }}
+        TIMESTAMP_URL: ${{ inputs.timestamp-url }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $files = $env:FILES -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() }
+        if ($files.Count -eq 0) { throw 'No files given.' }
+        foreach ($f in $files) { if (-not (Test-Path -LiteralPath $f)) { throw "File not found: $f" } }
+
+        function Rename-WithSuffix([string]$path, [string]$suffix) {
+          $item = Get-Item -LiteralPath $path
+          $new = Join-Path $item.DirectoryName ($item.BaseName + $suffix + $item.Extension)
+          Move-Item -LiteralPath $path -Destination $new -Force
+          return $new
+        }
+
+        $results = @()
+        switch ($env:MODE) {
+          'false' {
+            foreach ($f in $files) { $results += Rename-WithSuffix $f '-unsigned' }
+            Write-Host 'SIGN_WINDOWS=false: files left unsigned.'
+          }
+          'test' {
+            if ([string]::IsNullOrEmpty($env:PFX_B64) -or [string]::IsNullOrEmpty($env:PFX_PASSWORD)) {
+              throw 'SIGN_WINDOWS=test needs the secrets WIN_TESTSIGN_PFX_BASE64 and WIN_TESTSIGN_PFX_PASSWORD. See docs/test-signing.md.'
+            }
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signtool) { throw 'signtool.exe was not found in the Windows SDK.' }
+            $pfx = Join-Path $env:RUNNER_TEMP 'testsign.pfx'
+            try {
+              [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+              foreach ($f in $files) {
+                & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:PFX_PASSWORD /tr $env:TIMESTAMP_URL /td SHA256 $f
+                if ($LASTEXITCODE -ne 0) { throw "signtool failed for $f" }
+                $sig = Get-AuthenticodeSignature -LiteralPath $f
+                if ($null -eq $sig.SignerCertificate) { throw "No signature found on $f after signing." }
+                if ($null -eq $sig.TimeStamperCertificate) { throw "No timestamp found on $f after signing." }
+                Write-Host "Signed $f with $($sig.SignerCertificate.Subject) (status $($sig.Status); NotTrusted is expected for a personal CA)."
+                $results += Rename-WithSuffix $f '-testsigned'
+              }
+            }
+            finally {
+              if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx -Force }
+            }
+          }
+          'production' {
+            throw 'SIGN_WINDOWS=production is not configured yet: the signing service has not been chosen. See docs/releasing.md.'
+          }
+          default { throw "Unknown SIGN_WINDOWS mode '$($env:MODE)'. Use false, test or production." }
+        }
+        "files<<EOF`n" + ($results -join "`n") + "`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8

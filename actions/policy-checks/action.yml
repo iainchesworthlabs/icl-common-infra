@@ -1,0 +1,134 @@
+name: Policy checks
+description: >-
+  Runs every static check that needs no build, and runs all of them even after one
+  fails so a single run lists every problem: branch name, commit and pull request
+  text, committed-file text, preprocessor policy, action pinning, changelog fragment,
+  REUSE licensing, and the vcpkg baseline-in-fork rule. Needs a checkout with full
+  history (fetch-depth: 0). Each failure is also written to the job summary together
+  with the command that reproduces it locally.
+
+inputs:
+  base-ref:
+    description: Git ref of the base, for example origin/develop. Commits and the changelog diff are taken against it.
+    required: true
+  head-ref:
+    description: Git ref of the head.
+    default: HEAD
+  branch-name:
+    description: Name of the pull request branch. Empty skips the branch-name check.
+    default: ""
+  pr-title:
+    description: Pull request title. Empty skips the title check.
+    default: ""
+  pr-body:
+    description: Pull request body.
+    default: ""
+  no-changelog:
+    description: "true when the pull request carries the no-changelog label."
+    default: "false"
+  skip-changelog:
+    description: "true to skip the changelog fragment check (release preparation, Dependabot)."
+    default: "false"
+  reuse-version:
+    description: Version of the reuse tool to install from PyPI.
+    default: "6.2.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Run checks
+      shell: bash
+      env:
+        SCRIPTS: ${{ github.action_path }}/../../scripts
+        BASE_REF: ${{ inputs.base-ref }}
+        HEAD_REF: ${{ inputs.head-ref }}
+        BRANCH_NAME: ${{ inputs.branch-name }}
+        PR_TITLE: ${{ inputs.pr-title }}
+        PR_BODY: ${{ inputs.pr-body }}
+        NO_CHANGELOG: ${{ inputs.no-changelog }}
+        SKIP_CHANGELOG: ${{ inputs.skip-changelog }}
+        REUSE_VERSION: ${{ inputs.reuse-version }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -uo pipefail
+        failed=()
+        summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+        run_check() {
+          local name="$1" repro="$2"
+          shift 2
+          local log
+          log="$(mktemp)"
+          if "$@" >"$log" 2>&1; then
+            echo "pass  $name"
+          else
+            echo "FAIL  $name"
+            sed 's/^/      /' "$log"
+            failed+=("$name")
+            {
+              echo "### Failed: $name"
+              echo
+              echo '```'
+              tail -n 40 "$log"
+              echo '```'
+              echo "Reproduce locally: \`$repro\`"
+              echo
+            } >> "$summary"
+          fi
+        }
+
+        if [ -n "$BRANCH_NAME" ]; then
+          run_check "branch name" "python3 scripts/check_branch_name.py $BRANCH_NAME" \
+            python3 "$SCRIPTS/check_branch_name.py" "$BRANCH_NAME"
+        fi
+
+        run_check "commit text" "python3 scripts/check_text_policy.py commits $BASE_REF..$HEAD_REF" \
+          python3 "$SCRIPTS/check_text_policy.py" commits "$BASE_REF..$HEAD_REF"
+
+        if [ -n "$PR_TITLE" ]; then
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+          run_check "pull request text" "python3 scripts/check_text_policy.py text --title ... --body-file ..." \
+            python3 "$SCRIPTS/check_text_policy.py" text --title "$PR_TITLE" --body-file "$RUNNER_TEMP/pr-body.txt"
+        fi
+
+        run_check "committed files text" "python3 scripts/check_text_policy.py files" \
+          python3 "$SCRIPTS/check_text_policy.py" files
+
+        if [ -f tools/preprocessor-baseline.json ]; then
+          run_check "preprocessor policy" "python3 scripts/check_no_preprocessor.py" \
+            python3 "$SCRIPTS/check_no_preprocessor.py"
+        fi
+
+        run_check "action pinning" "python3 scripts/check_action_pinning.py" \
+          python3 "$SCRIPTS/check_action_pinning.py"
+
+        if [ "$SKIP_CHANGELOG" != "true" ]; then
+          args=(--base "$BASE_REF" --head "$HEAD_REF")
+          if [ "$NO_CHANGELOG" = "true" ]; then args+=(--no-changelog); fi
+          run_check "changelog fragment" "python3 scripts/check_changelog_fragment.py --base $BASE_REF" \
+            python3 "$SCRIPTS/check_changelog_fragment.py" "${args[@]}"
+        fi
+
+        if [ -f vcpkg.json ]; then
+          run_check "vcpkg baseline in fork" "python3 scripts/check_vcpkg_baseline_in_fork.py --base $BASE_REF" \
+            python3 "$SCRIPTS/check_vcpkg_baseline_in_fork.py" --base "$BASE_REF" --head "$HEAD_REF"
+        fi
+
+        if [ -f REUSE.toml ] || [ -d .reuse ]; then
+          python3 -m pip install --quiet "reuse==$REUSE_VERSION"
+          run_check "reuse lint" "reuse lint" reuse lint
+        else
+          echo "skip  reuse lint (no REUSE.toml)"
+        fi
+
+        if [ "${#failed[@]}" -gt 0 ]; then
+          echo
+          echo "Failed: ${failed[*]}"
+          exit 1
+        fi
+        echo "All policy checks passed."
