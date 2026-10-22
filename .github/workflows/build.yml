@@ -107,7 +107,8 @@ jobs:
           set -euo pipefail
           args=()
           if [ -n "$FEATURES" ]; then args+=("-DVCPKG_MANIFEST_FEATURES=$FEATURES"); fi
-          cmake --preset "$PRESET" "${args[@]}"
+          # bash 3.2 (macOS) fails on an empty array under set -u, hence the + form.
+          cmake --preset "$PRESET" ${args[@]+"${args[@]}"}
 
       - name: Build
         shell: bash
@@ -118,7 +119,7 @@ jobs:
           set -euo pipefail
           args=()
           if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
-          cmake --build --preset "$PRESET" "${args[@]}"
+          cmake --build --preset "$PRESET" ${args[@]+"${args[@]}"}
 
       - name: Test
         if: matrix.tests != false
