@@ -50,6 +50,10 @@ jobs:
           SCRIPT: ${{ matrix.toolchain_script }}
         run: bash "$SCRIPT"
 
+      - name: Set up CMake
+        if: matrix.build_mode == 'manual'
+        uses: $/actions/setup-cmake
+
       - name: Set up vcpkg
         if: matrix.vcpkg == true
         uses: $/actions/setup-vcpkg

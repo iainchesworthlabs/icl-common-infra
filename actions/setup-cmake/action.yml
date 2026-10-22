@@ -1,0 +1,35 @@
+name: Set up CMake
+description: >-
+  Installs CMake from PyPI so that every runner has the same version, ahead of the CMake
+  that ships with the runner image (3.x on the hosted images, while projects need 4.0 or
+  later). The version comes from the `version` input, else from the `cmake` key of
+  `.github/toolchain-versions.json` in the workspace, else any 4.x release. Run it after the
+  checkout and after setup-msvc-env, because the Visual Studio developer environment puts
+  its own CMake first on PATH.
+
+inputs:
+  version:
+    description: Exact CMake version, for example 4.4.4. Empty reads .github/toolchain-versions.json.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Install CMake
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        spec="$VERSION"
+        if [ -z "$spec" ] && [ -f .github/toolchain-versions.json ]; then
+          spec="$(python -c "import json; print(json.load(open('.github/toolchain-versions.json')).get('cmake', ''))")"
+        fi
+        if [ -z "$spec" ]; then requirement='cmake>=4.0,<5'; else requirement="cmake==$spec"; fi
+        python -m pip install --quiet "$requirement"
+        cmake --version
