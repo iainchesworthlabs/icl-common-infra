@@ -1,0 +1,7 @@
+# actionlint predates the `$/` self-repository syntax (GitHub changelog 2026-07), so it
+# reports "ref is missing" for it. Reusable workflows here use `$/` to call sibling
+# actions at the commit the caller pinned.
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      - 'specifying action "\$/.*" in invalid format because ref is missing'

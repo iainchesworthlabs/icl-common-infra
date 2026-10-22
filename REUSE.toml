@@ -1,0 +1,8 @@
+version = 1
+
+# Files without an SPDX header take the licence below; files with a header keep theirs.
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Iain Chesworth Labs contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
