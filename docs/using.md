@@ -25,6 +25,10 @@ The `ci-status` action takes `toJSON(needs)` and a map of job id to "the plan as
 and fails when a job failed, was cancelled, or was skipped although the plan asked for it.
 Configure the planner with `.github/ci/plan.json` in the consumer.
 
+Scripts run by a caller job (the planner, the coverage gate) come from the same commit as the
+workflow: call `actions/checkout-infra` after the caller's own checkout and use `.icl-infra/scripts/...`.
+The commit is read from the `uses:` line, so Dependabot's bump of that line moves the scripts too.
+
 ## CMake modules
 
 Add `cmake/` of this repository to `CMAKE_MODULE_PATH` (the template vendors a pinned copy under

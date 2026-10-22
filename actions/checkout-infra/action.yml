@@ -1,0 +1,22 @@
+name: Check out icl-common-infra
+description: >-
+  Checks out this repository at the commit the caller pinned, into `.icl-infra`, so a job
+  can run the scripts that belong to the same version as the workflow and actions it uses.
+  Dependabot bumps the commit in the `uses:` line; reading it from `github.action_ref`
+  means the scripts follow without a second pin to maintain.
+
+inputs:
+  path:
+    description: Directory to check out into.
+    default: .icl-infra
+
+runs:
+  using: composite
+  steps:
+    - name: Check out
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ${{ github.action_repository }}
+        ref: ${{ github.action_ref }}
+        path: ${{ inputs.path }}
+        persist-credentials: false
