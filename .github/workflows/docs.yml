@@ -1,10 +1,12 @@
 name: Docs
 
-# Reusable. Builds the MkDocs Material site with --strict. With `deploy: true` it also
-# publishes to GitHub Pages (the repository's Pages build type must be "GitHub Actions").
-# Callers build on pull requests (deploy false) and deploy on the push the release bot
-# makes to `main`, so the published site always matches the latest release. Pushes made
-# with an App token start workflows; pushes made with GITHUB_TOKEN do not.
+# Reusable. Builds the MkDocs Material site with --strict. With `upload: true` it also
+# uploads the site as the Pages artifact. Publishing is a separate workflow, docs-deploy.yml,
+# so that a caller's build job needs only `contents: read`: a called workflow that contains a
+# job asking for `pages: write` fails to start unless the calling job grants it, even when the
+# job is skipped. Callers build on pull requests and, on the push the release bot makes to
+# `main`, build with `upload: true` and then call docs-deploy.yml. Pushes made with an App
+# token start workflows; pushes made with GITHUB_TOKEN do not.
 
 on:
   workflow_call:
@@ -13,7 +15,8 @@ on:
         description: Repository path of the pip requirements file for the docs tooling.
         type: string
         default: requirements/docs.txt
-      deploy:
+      upload:
+        description: Upload the built site as the Pages artifact for docs-deploy.yml.
         type: boolean
         default: false
 
@@ -51,22 +54,7 @@ jobs:
         run: mkdocs build --strict --site-dir site
 
       - name: Upload the site
-        if: inputs.deploy
+        if: inputs.upload
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
-
-  deploy:
-    name: Deploy to Pages
-    needs: build
-    if: inputs.deploy
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-    steps:
-      - name: Deploy
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

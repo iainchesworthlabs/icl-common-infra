@@ -1,0 +1,25 @@
+name: Docs deploy
+
+# Reusable. Publishes the Pages artifact that a docs.yml call with `upload: true` made earlier
+# in the same run. The caller job needs `needs:` on that build job and grants
+# `pages: write` and `id-token: write`. The repository's Pages build type must be
+# "GitHub Actions".
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  deploy:
+    name: Deploy to Pages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

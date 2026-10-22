@@ -12,7 +12,8 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `policy.yml` | Branch name, commit and PR text, preprocessor policy, action pinning, changelog fragment, vcpkg baseline in fork, REUSE. Runs on drafts. | `base-ref`, `runner`, `skip-changelog` |
 | `build.yml` | Build and test a list of legs with CMake presets. | `legs` (JSON, see the file header), `timeout-minutes` |
 | `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON) |
-| `docs.yml` | `mkdocs build --strict`; Pages deploy when `deploy: true`. | `requirements`, `deploy` |
+| `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`. | `requirements`, `upload` |
+| `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
 | `release-publish.yml` | Tag checks, SHA-512 sums, GPG signatures, SBOM, attestations, GitHub Release, fast-forward of `main`. | `artifact-pattern` |
 | `zizmor.yml` | Workflow static analysis. | `min-severity` |
 | `dependabot-auto-merge.yml` | Enable auto-merge for non-major Actions and tooling updates. | secret `MERGE_QUEUE_TOKEN` |
