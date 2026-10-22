@@ -69,8 +69,15 @@ call() {
   fi
 }
 
-# read_api PATH: always executes (reads only). Empty output when it fails.
-read_api() { gh api "$1" 2>/dev/null || true; }
+# read_api PATH: always executes (reads only). Empty output when it fails. On an error
+# (404 for a resource that does not exist yet) gh still prints the error body to stdout,
+# so the output is kept only when the call succeeds.
+read_api()
+{
+  local out
+  if out="$(gh api "$1" 2>/dev/null)"; then printf '%s' "$out"; fi
+  return 0
+}
 
 subst() { # stdin -> stdout with placeholders replaced; exit 3 if any remain
   APP="${RELEASE_BOT_APP_ID:-}" OWNER="${OWNER_USER:-}" python3 -c '
