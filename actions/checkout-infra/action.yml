@@ -2,8 +2,13 @@ name: Check out icl-common-infra
 description: >-
   Checks out this repository at the commit the caller pinned, into `.icl-infra`, so a job
   can run the scripts that belong to the same version as the workflow and actions it uses.
-  Dependabot bumps the commit in the `uses:` line; reading it from `github.action_ref`
-  means the scripts follow without a second pin to maintain.
+  Dependabot bumps the commit in the `uses:` line; reading it from the directory the runner
+  downloaded this action into means the scripts follow without a second pin to maintain.
+
+  The runner places an action at <work>/_actions/<owner>/<repo>/<ref>/<path in repository>.
+  The owner, repository and ref are read from that location. The `github.action_ref` and
+  `github.action_repository` contexts are not used for the nested checkout step, because
+  inside a `with:` of a nested step they describe the nested action (actions/checkout).
 
 inputs:
   path:
@@ -13,10 +18,23 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Locate this action
+      id: where
+      shell: bash
+      run: |
+        set -euo pipefail
+        # GITHUB_ACTION_PATH is <work>/_actions/<owner>/<repo>/<ref>/actions/checkout-infra
+        root="$(cd "$GITHUB_ACTION_PATH/../.." && pwd)"
+        ref="$(basename "$root")"
+        repo_dir="$(dirname "$root")"
+        repository="$(basename "$(dirname "$repo_dir")")/$(basename "$repo_dir")"
+        echo "repository=$repository" >> "$GITHUB_OUTPUT"
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
     - name: Check out
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        repository: ${{ github.action_repository }}
-        ref: ${{ github.action_ref }}
+        repository: ${{ steps.where.outputs.repository }}
+        ref: ${{ steps.where.outputs.ref }}
         path: ${{ inputs.path }}
         persist-credentials: false
