@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Belongs in iainchesworthlabs/vcpkg at .github/workflows/sync-upstream.yml.
+#
+# Keeps the fork's master level with microsoft/vcpkg so that every upstream commit a
+# Dependabot baseline bump can name exists in the fork (the `vcpkg-baseline-in-fork`
+# policy check fails a pull request until it does). Custom ports live on their own
+# branch or in an overlay directory, never on master, so the sync is a fast-forward.
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fast-forward master from upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/microsoft/vcpkg.git
+          git fetch --no-tags upstream master
+          git merge --ff-only upstream/master
+          git push origin HEAD:master

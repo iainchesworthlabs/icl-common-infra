@@ -1,0 +1,31 @@
+{
+  "name": "main-release-only",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "update"
+    },
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": "__RELEASE_BOT_APP_ID__",
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ]
+}

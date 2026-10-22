@@ -1,0 +1,107 @@
+[
+  {
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "Something is broken"
+  },
+  {
+    "name": "feature",
+    "color": "0e8a16",
+    "description": "New capability"
+  },
+  {
+    "name": "docs",
+    "color": "0075ca",
+    "description": "Documentation"
+  },
+  {
+    "name": "chore",
+    "color": "cfd3d7",
+    "description": "Maintenance with no user-visible change"
+  },
+  {
+    "name": "security",
+    "color": "b60205",
+    "description": "Security issue or hardening"
+  },
+  {
+    "name": "dependencies",
+    "color": "0366d6",
+    "description": "Dependency update"
+  },
+  {
+    "name": "github-actions",
+    "color": "000000",
+    "description": "Workflow or action change"
+  },
+  {
+    "name": "performance",
+    "color": "fbca04",
+    "description": "Speed or memory"
+  },
+  {
+    "name": "i18n",
+    "color": "c5def5",
+    "description": "Translation or localisation"
+  },
+  {
+    "name": "ui",
+    "color": "bfd4f2",
+    "description": "User interface"
+  },
+  {
+    "name": "no-changelog",
+    "color": "ededed",
+    "description": "Skips the changelog fragment check"
+  },
+  {
+    "name": "nightly-analysis",
+    "color": "d93f0b",
+    "description": "Opened by a nightly analysis workflow"
+  },
+  {
+    "name": "deep",
+    "color": "5319e7",
+    "description": "Run the full CI matrix on this pull request"
+  },
+  {
+    "name": "good first issue",
+    "color": "7057ff",
+    "description": "Good for newcomers"
+  },
+  {
+    "name": "help wanted",
+    "color": "008672",
+    "description": "Extra attention is needed"
+  },
+  {
+    "name": "platform:windows",
+    "color": "1d76db",
+    "description": "Windows"
+  },
+  {
+    "name": "platform:macos",
+    "color": "1d76db",
+    "description": "macOS"
+  },
+  {
+    "name": "platform:linux",
+    "color": "1d76db",
+    "description": "Linux"
+  },
+  {
+    "name": "platform:ios",
+    "color": "1d76db",
+    "description": "iOS"
+  },
+  {
+    "name": "platform:android",
+    "color": "1d76db",
+    "description": "Android"
+  },
+  {
+    "name": "platform:wasm",
+    "color": "1d76db",
+    "description": "WebAssembly"
+  }
+]

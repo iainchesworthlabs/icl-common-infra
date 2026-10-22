@@ -1,0 +1,46 @@
+{
+  "repository": {
+    "has_issues": true,
+    "has_wiki": false,
+    "has_projects": false,
+    "has_discussions": false,
+    "allow_squash_merge": true,
+    "allow_merge_commit": false,
+    "allow_rebase_merge": false,
+    "squash_merge_commit_title": "PR_TITLE",
+    "squash_merge_commit_message": "PR_BODY",
+    "allow_auto_merge": true,
+    "delete_branch_on_merge": true,
+    "allow_update_branch": true,
+    "default_branch": "develop"
+  },
+  "topics": [
+    "cpp",
+    "cpp23",
+    "cmake",
+    "vcpkg"
+  ],
+  "actions": {
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false,
+    "sha_pinning_required": true
+  },
+  "security": {
+    "dependabot_security_updates": true,
+    "secret_scanning": true,
+    "secret_scanning_push_protection": true,
+    "private_vulnerability_reporting": true,
+    "vulnerability_alerts": true
+  },
+  "pages": {
+    "build_type": "workflow"
+  },
+  "environments": {
+    "release": {
+      "reviewers": [
+        "__OWNER_USER__"
+      ],
+      "prevent_self_review": false
+    }
+  }
+}
