@@ -49,7 +49,7 @@ apt_retry() {
     # killed and tried again, which is safe before anything is unpacked. apt's own timeouts do not fire
     # for it. The install then reads only the local cache. A normal download of GCC takes under a minute.
     until { [ "$attempt" -lt 2 ] || use_main_archive; } && timeout 180 apt-get update && { [ "$#" -eq 0 ] || {
-        timeout 240 apt-get install -y --download-only --no-install-recommends "$@" &&
+        timeout 150 apt-get install -y --download-only --no-install-recommends "$@" &&
             apt-get install -y --no-install-recommends "$@"; }; }
     do
         echo "::warning title=apt-get::attempt $attempt of 3 failed"
