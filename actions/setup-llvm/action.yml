@@ -1,0 +1,42 @@
+name: Setup LLVM
+description: >-
+  Install the LLVM/Clang major version pinned in .github/toolchain-versions.json (key `llvm`) on an
+  Ubuntu runner, with lld, llvm-symbolizer, clang-tidy and the sanitizer runtimes, and set CC and CXX
+  to it. Other systems and an empty pin are left alone. The standard's floor is Clang 23, which
+  comes from apt.llvm.org until Ubuntu carries it. Clang uses the newest libstdc++ installed, so a
+  job that needs the C++23 library installs GCC with setup-gcc first.
+
+inputs:
+  version:
+    description: LLVM major version. Empty reads the `llvm` key of .github/toolchain-versions.json.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Read the pin
+      id: pin
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        file=.github/toolchain-versions.json
+        if [ -z "$VERSION" ] && [ -f "$file" ]; then
+          VERSION="$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('llvm', ''))" "$file")"
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Install LLVM
+      if: runner.os == 'Linux' && steps.pin.outputs.version != ''
+      shell: bash
+      env:
+        LLVM_VERSION: ${{ steps.pin.outputs.version }}
+      run: | # zizmor: ignore[github-env] the value is the compiler major version pinned in the repository's own toolchain-versions.json
+        set -euo pipefail
+        sudo --preserve-env=LLVM_VERSION bash "$GITHUB_ACTION_PATH/install-llvm.sh"
+        echo "CC=clang-$LLVM_VERSION" >> "$GITHUB_ENV"
+        echo "CXX=clang++-$LLVM_VERSION" >> "$GITHUB_ENV"
+        # ASan and UBSan call llvm-symbolizer; the versioned name is not on PATH by default.
+        echo "ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-$LLVM_VERSION" >> "$GITHUB_ENV"
+        echo "TSAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-$LLVM_VERSION" >> "$GITHUB_ENV"

@@ -11,7 +11,11 @@ name: Build and test
 #   tests             false to build without running tests; default true
 #   qt                true to install Qt (version from .github/toolchain-versions.json)
 #   qt_modules        extra Qt modules, space separated
-#   msvc              true to load the MSVC developer environment
+#   msvc              true to load the MSVC developer environment (checks the `msvc_toolset` pin)
+#   compiler          gcc or clang: installs the GCC (`gcc` pin) or Clang (`llvm` pin) of
+#                     .github/toolchain-versions.json and sets CC and CXX. A clang leg also installs
+#                     GCC, because Clang takes its C++ library from the newest libstdc++.
+#   experimental      true for a leg that reports but cannot fail the run (a preview toolchain)
 #   emscripten        true to install Emscripten
 #   toolchain_script  repository path of a script that installs the compiler (runs first)
 #   vcpkg_features    manifest features this leg enables; also names the vcpkg cache lineage
@@ -37,6 +41,7 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    continue-on-error: ${{ matrix.experimental == true }}
     permissions:
       contents: read
     strategy:
@@ -55,6 +60,16 @@ jobs:
         env:
           SCRIPT: ${{ matrix.toolchain_script }}
         run: bash "$SCRIPT"
+
+      - name: Install GCC
+        if: matrix.compiler == 'gcc' || matrix.compiler == 'clang'
+        uses: $/actions/setup-gcc
+        with:
+          export-compiler: ${{ matrix.compiler == 'gcc' }}
+
+      - name: Install Clang
+        if: matrix.compiler == 'clang'
+        uses: $/actions/setup-llvm
 
       - name: Load the MSVC environment
         if: matrix.msvc == true
@@ -97,6 +112,15 @@ jobs:
         uses: $/actions/setup-ccache
         with:
           key: ${{ matrix.name }}
+
+      - name: Report the compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${CXX:-}" ]; then "$CXX" --version | head -2
+          elif [ "$RUNNER_OS" = Windows ]; then cl 2>&1 | head -1
+          else c++ --version | head -2
+          fi
 
       - name: Configure
         shell: bash

@@ -1,0 +1,45 @@
+name: Setup GCC
+description: >-
+  Install the GCC major version pinned in .github/toolchain-versions.json (key `gcc`) on an Ubuntu
+  runner and make it the default `gcc`, `g++` and `gcov`. Other systems and an empty pin are left
+  alone. The standard's floor is GCC 16, which Ubuntu 26.04 carries in `universe`.
+
+inputs:
+  version:
+    description: GCC major version. Empty reads the `gcc` key of .github/toolchain-versions.json.
+    default: ""
+  export-compiler:
+    description: >-
+      true to set CC and CXX for later steps (default). Clang legs install GCC for its libstdc++ and
+      pass false, then let setup-llvm set the compiler.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Read the pin
+      id: pin
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        file=.github/toolchain-versions.json
+        if [ -z "$VERSION" ] && [ -f "$file" ]; then
+          VERSION="$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('gcc', ''))" "$file")"
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Install GCC
+      if: runner.os == 'Linux' && steps.pin.outputs.version != ''
+      shell: bash
+      env:
+        GCC_VERSION: ${{ steps.pin.outputs.version }}
+        EXPORT_COMPILER: ${{ inputs.export-compiler }}
+      run: | # zizmor: ignore[github-env] the value is the compiler major version pinned in the repository's own toolchain-versions.json
+        set -euo pipefail
+        sudo --preserve-env=GCC_VERSION bash "$GITHUB_ACTION_PATH/install-gcc.sh"
+        if [ "$EXPORT_COMPILER" = "true" ]; then
+          echo "CC=gcc-$GCC_VERSION" >> "$GITHUB_ENV"
+          echo "CXX=g++-$GCC_VERSION" >> "$GITHUB_ENV"
+        fi

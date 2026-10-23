@@ -34,6 +34,21 @@ Scripts run by a caller job (the planner, the coverage gate) come from the same 
 workflow: call `actions/checkout-infra` after the caller's own checkout and use `.icl-infra/scripts/...`.
 The commit is read from the `uses:` line, so Dependabot's bump of that line moves the scripts too.
 
+## Compilers
+
+The floor is GCC 16, Clang 23 and MSVC 14.51 (14.52 when the runners carry it), with the newest Apple Clang
+the macOS runners offer. The versions are pins in `.github/toolchain-versions.json`:
+
+| Key | Used by | Meaning |
+|---|---|---|
+| `gcc` | `actions/setup-gcc` | GCC major version, installed on Ubuntu (26.04 has it in `universe`) |
+| `llvm` | `actions/setup-llvm` | LLVM major version, from the Ubuntu archive or apt.llvm.org |
+| `msvc_toolset` | `actions/setup-msvc-env` | lowest acceptable toolset; a newer one passes |
+
+A `build.yml` leg sets `"compiler": "gcc"` or `"compiler": "clang"` (which also installs GCC for its libstdc++);
+the leg's runner is `ubuntu-26.04`. A leg with `"experimental": true` reports but cannot fail the run, for a
+preview toolchain such as the `xcode-27` runner. Apple Clang comes with the runner image; choose the label.
+
 ## Qt
 
 `actions/setup-qt` installs the Qt kit named by the `qt` key of `.github/toolchain-versions.json` (and, on Windows,
