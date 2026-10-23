@@ -14,7 +14,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON) |
 | `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`. | `requirements`, `upload` |
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
-| `release-publish.yml` | Tag checks, SHA-512 sums, GPG signatures, SBOM, attestations, GitHub Release, fast-forward of `main`. | `artifact-pattern` |
+| `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures, SBOM, attestations, GitHub Release, fast-forward of `main`. | `artifact-pattern` |
 | `zizmor.yml` | Workflow static analysis. | `min-severity` |
 | `dependabot-auto-merge.yml` | Enable auto-merge for non-major Actions and tooling updates. | secret `MERGE_QUEUE_TOKEN` |
 
@@ -80,6 +80,17 @@ include(IclPlatform)    # icl_platform_sources(<target>) picks src/platform/<os>
 
 Sanitizers, Tracy, coverage and fuzzing are mutually exclusive; the configure stops with a
 message when two are on.
+
+## Release notes
+
+A release always has notes from the changelog; there is no placeholder. `release-publish.yml` runs
+`actions/release-notes` in `verify` (before the approval wait) and again when it creates the release.
+
+- A final release (`v1.2.0`) needs a `## [1.2.0]` section in `CHANGELOG.md`. Make it with a pull request that runs
+  `changelog_tool.py assemble --version 1.2.0 --date YYYY-MM-DD`, then tag the merge commit. The run fails without it.
+- A pre-release (`v1.2.0-rc.1`) uses that section when it exists. Otherwise its notes are the fragments still in
+  `changelog.d/`, left in place, so the final release lists every change since the previous final release.
+- `changelog_tool.py notes --version 1.2.0 --allow-pending` prints the same text locally.
 
 ## Commit and pull request text
 

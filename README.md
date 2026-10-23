@@ -10,7 +10,7 @@ and call this repository by commit SHA.
 | Path | What it holds |
 |---|---|
 | `.github/workflows/` | Reusable workflows (`workflow_call`): `policy`, `build`, `codeql`, `docs`, `release-publish`, `zizmor`, `dependabot-auto-merge`. This repository's own CI is `ci.yml`, and `self-dependabot-auto-merge.yml` calls the reusable auto-merge workflow for its Dependabot pull requests. |
-| `actions/` | Composite actions: `setup-vcpkg`, `save-vcpkg-cache`, `setup-qt`, `setup-ccache`, `setup-msvc-env`, `setup-emscripten`, `decide-runner`, `policy-checks`, `run-ctest`, `ci-status`, `dependency-review`, `report-nightly-failure`, `sign-windows`. |
+| `actions/` | Composite actions: `setup-vcpkg`, `save-vcpkg-cache`, `setup-qt`, `setup-ccache`, `setup-msvc-env`, `setup-emscripten`, `decide-runner`, `policy-checks`, `run-ctest`, `ci-status`, `dependency-review`, `report-nightly-failure`, `sign-windows`, `release-notes`. |
 | `cmake/` | `IclVcpkgRoot`, `FindQt6`, `IclWarnings`, `IclSanitizers`, `IclHardening`, `IclTracy`, `IclCoverage`, `IclPlatform`. |
 | `scripts/` | Checks and tools run by the actions: preprocessor policy, commit and PR text policy, action pinning, changelog fragments, planner, pre-push check, ctest phases, coverage gate, changelog assembly. Unit tests are in `scripts/tests/`. |
 | `admin/` | `apply.sh` and the default rulesets, labels and repository settings. |

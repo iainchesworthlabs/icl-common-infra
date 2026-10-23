@@ -4,7 +4,7 @@ name: Release publish
 # builds and platform-signs the packages first and uploads them as workflow artifacts
 # whose names start with `release-`; this workflow then:
 #
-#   verify    the tag is semver and points at a commit on develop
+#   verify    the tag is semver, points at a commit on develop, and the release has notes
 #   publish   SHA-512 sums, detached GPG signatures, SPDX SBOM, build-provenance
 #             attestations, GitHub Release (pre-release when the tag has a suffix)
 #   promote   fast-forwards `main` to the tag with the release bot, for final releases
@@ -74,6 +74,13 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Check the release has notes
+        uses: $/actions/release-notes
+        with:
+          version: ${{ steps.check.outputs.version }}
+          prerelease: ${{ steps.check.outputs.prerelease }}
+          output-file: ${{ runner.temp }}/notes-check.md
 
   publish:
     name: Sign and publish
@@ -160,22 +167,11 @@ jobs:
             !dist/*.asc
 
       - name: Release notes
-        shell: bash
-        env:
-          VERSION: ${{ needs.verify.outputs.version }}
-        run: |
-          set -euo pipefail
-          if [ -f CHANGELOG.md ] && grep -q "^## \[$VERSION\]" CHANGELOG.md; then
-            python3 - <<'PY' > "$RUNNER_TEMP/notes.md"
-          import os, re, sys
-          text = open("CHANGELOG.md", encoding="utf-8").read()
-          v = re.escape(os.environ["VERSION"])
-          m = re.search(rf"^## \[{v}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.M | re.S)
-          sys.stdout.write(m.group(1).strip() + "\n")
-          PY
-          else
-            echo "Release $VERSION" > "$RUNNER_TEMP/notes.md"
-          fi
+        uses: $/actions/release-notes
+        with:
+          version: ${{ needs.verify.outputs.version }}
+          prerelease: ${{ needs.verify.outputs.prerelease }}
+          output-file: ${{ runner.temp }}/notes.md
 
       - name: Create the release
         shell: bash

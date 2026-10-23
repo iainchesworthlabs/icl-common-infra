@@ -1,0 +1,43 @@
+name: Release notes
+description: >-
+  Writes the notes of a release to a file, and fails when there are none. A final release needs a
+  section for its version in CHANGELOG.md, made by `changelog_tool.py assemble` in a pull request
+  before the tag. A pre-release uses that section when it exists, and otherwise the fragments
+  still waiting in changelog.d, without consuming them, so the final release lists every change
+  since the previous final release. There is no placeholder text.
+
+inputs:
+  version:
+    description: Version without the leading v, for example 1.2.0 or 1.2.0-rc.1. The section looked up is the part before any suffix.
+    required: true
+  prerelease:
+    description: "true for a version with a suffix."
+    default: "false"
+  output-file:
+    description: File to write the notes to.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Write the notes
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        OUTPUT: ${{ inputs.output-file }}
+      run: |
+        set -euo pipefail
+        base="${VERSION%%-*}"
+        flags=()
+        if [ "$PRERELEASE" = "true" ]; then flags+=(--allow-pending); fi
+        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/changelog_tool.py" notes --version "$base" "${flags[@]}" > "$OUTPUT"; then
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "::error::$VERSION has no release notes: CHANGELOG.md has no '## [$base]' section and changelog.d holds no fragments."
+          else
+            echo "::error::$VERSION has no release notes: CHANGELOG.md has no '## [$base]' section. Assemble the changelog in a pull request (docs/releasing.md, step 2), then tag the merge commit."
+          fi
+          exit 1
+        fi
+        echo "Release notes for $VERSION:"
+        sed 's/^/    /' "$OUTPUT"
