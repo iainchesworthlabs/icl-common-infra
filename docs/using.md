@@ -34,7 +34,16 @@ Scripts run by a caller job (the planner, the coverage gate) come from the same 
 workflow: call `actions/checkout-infra` after the caller's own checkout and use `.icl-infra/scripts/...`.
 The commit is read from the `uses:` line, so Dependabot's bump of that line moves the scripts too.
 
+## Qt
+
+`actions/setup-qt` installs the Qt kit named by the `qt` key of `.github/toolchain-versions.json` (and, on Windows,
+the `aqtsource` key). It does nothing when the key is empty, so a hand-written job can carry the step in a
+project without Qt. `build.yml` installs Qt for a leg with `"qt": true`.
+
 ## CMake modules
+
+A target that Qt generates sources for (moc, rcc, qmlcachegen) calls `icl_relax_generated_warnings(<target>)`
+from `IclWarnings` so the generated files are compiled without the strict warning set.
 
 Add `cmake/` of this repository to `CMAKE_MODULE_PATH` (the template vendors a pinned copy under
 `cmake/icl/` with a script that updates it) and include what you need:

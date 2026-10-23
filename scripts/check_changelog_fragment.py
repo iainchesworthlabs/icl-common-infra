@@ -24,7 +24,8 @@ from pathlib import Path
 TYPES = ("added", "changed", "deprecated", "removed", "fixed", "security")
 NAME = re.compile(r"^changelog\.d/([A-Za-z0-9][A-Za-z0-9._-]*)\.(" + "|".join(TYPES) + r")\.md$")
 NOT_USER_VISIBLE = ("docs/", ".github/", "tools/", "tests/", "changelog.d/README.md", ".editorconfig",
-                    ".clang-format", ".clang-tidy", "AGENTS.md", "CONTRIBUTING.md", "README.md", "REUSE.toml")
+                    ".clang-format", ".clang-tidy", "AGENTS.md", "CONTRIBUTING.md", "README.md", "REUSE.toml",
+                    "mkdocs.yml", "requirements/")
 
 
 def git(*args: str) -> str:

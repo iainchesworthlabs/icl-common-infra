@@ -6,8 +6,11 @@ description: >-
 
 inputs:
   version:
-    description: Qt version, for example 6.12.0. Callers read it from .github/toolchain-versions.json.
-    required: true
+    description: >-
+      Qt version, for example 6.12.0. When empty the action reads the `qt` key of
+      .github/toolchain-versions.json in the checked-out repository, and installs nothing if that
+      key is empty or the file is missing, so a job can carry this step in a project that has no Qt yet.
+    default: ""
   modules:
     description: Space-separated Qt add-on modules, for example "qtquick3d qtshadertools".
     default: ""
@@ -15,8 +18,8 @@ inputs:
     description: >-
       Optional aqtinstall source (pip requirement) used instead of the PyPI
       release. Needed on Windows for Qt 6.11 and later until a release newer
-      than aqtinstall 3.3.0 exists. Callers read it from
-      .github/toolchain-versions.json and pass it for Windows only.
+      than aqtinstall 3.3.0 exists. When `version` is read from
+      .github/toolchain-versions.json, the `aqtsource` key of that file is used on Windows.
     default: ""
   target:
     description: aqtinstall target, desktop (default), android, ios or wasm.
@@ -31,12 +34,31 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Read the pinned versions
+      id: pins
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        AQTSOURCE: ${{ inputs.aqtsource }}
+      run: |
+        set -euo pipefail
+        file=.github/toolchain-versions.json
+        if [ -z "$VERSION" ] && [ -f "$file" ]; then
+          VERSION="$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('qt', ''))" "$file")"
+          if [ -z "$AQTSOURCE" ] && [ "$RUNNER_OS" = Windows ]; then
+            AQTSOURCE="$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('aqtsource', ''))" "$file")"
+          fi
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "aqtsource=$AQTSOURCE" >> "$GITHUB_OUTPUT"
+
     - name: Install Qt
+      if: steps.pins.outputs.version != ''
       uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
       with:
-        version: ${{ inputs.version }}
+        version: ${{ steps.pins.outputs.version }}
         modules: ${{ inputs.modules }}
-        aqtsource: ${{ inputs.aqtsource }}
+        aqtsource: ${{ steps.pins.outputs.aqtsource }}
         target: ${{ inputs.target }}
         arch: ${{ inputs.arch }}
         host: ${{ inputs.host }}
