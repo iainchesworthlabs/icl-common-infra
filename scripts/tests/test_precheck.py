@@ -37,6 +37,12 @@ class Precheck(unittest.TestCase):
                                  capture_output=True, text=True)
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             self.assertIn("docs_only=true", res.stdout)
+            self.assertNotIn("NOTE", res.stdout)
+            (root / "docs/b.md").write_text("uncommitted\n")
+            res = subprocess.run([sys.executable, str(HERE / "precheck.py"), "--root", str(root), "--base", "develop"],
+                                 capture_output=True, text=True)
+            self.assertIn("NOTE  the checks read committed work only: 1 path(s) have uncommitted changes", res.stdout)
+            (root / "docs/b.md").unlink()
             git(root, "commit", "-q", "--allow-empty", "-m", "Fix\n\nBody.\n\nCo-Authored-By: X <x@y.z>")
             res = subprocess.run([sys.executable, str(HERE / "precheck.py"), "--root", str(root), "--base", "develop"],
                                  capture_output=True, text=True)
