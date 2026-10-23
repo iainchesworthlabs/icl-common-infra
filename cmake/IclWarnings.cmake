@@ -12,7 +12,8 @@
 #
 # ICL_WARNINGS_OFF_FLAG switches warnings off for one source file. Use it on
 # code written by generators (moc, rcc, qmlcachegen output), never on code
-# written by hand.
+# written by hand. icl_relax_generated_warnings(<target>), defined below, applies it
+# to a target's generated files.
 # ---------------------------------------------------------------------------
 
 include_guard(GLOBAL)
@@ -61,6 +62,32 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 else()
     set(ICL_WARNINGS_OFF_FLAG "-w")
 endif()
+
+# icl_relax_generated_warnings(<target>)
+#
+# Compiles the C++ files that generators put in the target (moc, rcc, qmlcachegen) without the strict
+# warning set. They are not code anyone reads, and some compilers reject them under -Werror (GCC 16
+# reports -Wnull-dereference inside Qt's qhash.h from qmlcachegen output). Call it once per target
+# that links icl::warnings. Qt adds its generated files when it finalises the target at the end of the
+# directory, so the work is deferred to the end of the calling directory.
+function(icl_relax_generated_warnings target)
+    # The arguments of a deferred call are expanded when it runs, after this function's variables are
+    # gone, so the target name is written into the call here.
+    cmake_language(EVAL CODE
+        "cmake_language(DEFER DIRECTORY [[${CMAKE_CURRENT_SOURCE_DIR}]] CALL _icl_relax_generated_warnings_now [[${target}]])")
+endfunction()
+
+function(_icl_relax_generated_warnings_now target)
+    get_target_property(target_sources ${target} SOURCES)
+    foreach(source IN LISTS target_sources)
+        if(source MATCHES "^${CMAKE_CURRENT_BINARY_DIR}/.*\\.(cpp|cxx|cc)$")
+            set_source_files_properties("${source}" PROPERTIES COMPILE_OPTIONS "${ICL_WARNINGS_OFF_FLAG}")
+        endif()
+    endforeach()
+    # AUTOMOC compiles this file without listing it in SOURCES.
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/${target}_autogen/mocs_compilation.cpp"
+        PROPERTIES COMPILE_OPTIONS "${ICL_WARNINGS_OFF_FLAG}" GENERATED ON)
+endfunction()
 
 unset(_icl_gnu_clang_warnings)
 unset(_icl_gnu_clang_cxx_warnings)

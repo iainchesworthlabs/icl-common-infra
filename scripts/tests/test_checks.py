@@ -97,6 +97,9 @@ class Fragment(unittest.TestCase):
     def test_docs_only_needs_none(self):
         self.assertEqual(frag.check({}, ["docs/a.md", ".github/workflows/x.yml"], False), [])
 
+    def test_docs_site_configuration_needs_none(self):
+        self.assertEqual(frag.check({}, ["docs/a.md", "mkdocs.yml", "requirements/docs.txt"], False), [])
+
     def test_bad_name_and_shape(self):
         self.assertTrue(frag.check({"changelog.d/x.md": self.GOOD}, [], False))
         self.assertTrue(frag.check({"changelog.d/x.fixed.md": "no bold"}, [], False))

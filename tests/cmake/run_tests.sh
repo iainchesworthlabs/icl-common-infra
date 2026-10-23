@@ -3,6 +3,9 @@
 # Smoke tests for the CMake modules. Needs cmake and a C++ compiler.
 set -euo pipefail
 
+# The modules read these; a developer machine that sets them would change the result.
+unset ICL_VCPKG_STORE ICL_VCPKG_MIRROR ICL_QT_ROOT QT_ROOT_DIR QTDIR VCPKG_ROOT
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 modules="$(cd "$here/../../cmake" && pwd)"
 work="$(mktemp -d)"
@@ -79,4 +82,30 @@ if cmake -S "$work/opt" -B "$work/c1" -DICL_SANITIZERS=thread -DICL_ENABLE_TRACY
 pass "sanitizers and Tracy cannot be combined"
 if cmake -S "$work/opt" -B "$work/c2" -DICL_SANITIZERS=thread,address >/dev/null 2>&1; then fail "thread + address"; fi
 pass "thread and address cannot be combined"
+# --- generated sources ------------------------------------------------------
+mkdir -p "$work/gen"
+echo 'int gen(); int main() { return gen(); }' > "$work/gen/main.cpp"
+for relax in ON OFF; do
+  cat > "$work/gen/CMakeLists.txt" <<CM
+cmake_minimum_required(VERSION 3.25)
+project(t CXX)
+list(APPEND CMAKE_MODULE_PATH "$modules")
+include(IclWarnings)
+file(WRITE "\${CMAKE_CURRENT_BINARY_DIR}/gen.cpp" "int gen() { int unused_value = 1; return 0; }\n")
+add_executable(t main.cpp "\${CMAKE_CURRENT_BINARY_DIR}/gen.cpp")
+target_link_libraries(t PRIVATE icl::warnings)
+if("$relax")
+  icl_relax_generated_warnings(t)
+endif()
+CM
+  d="$work/gen-$relax"
+  cmake -S "$work/gen" -B "$d" >/dev/null
+  if [ "$relax" = ON ]; then
+    cmake --build "$d" >/dev/null 2>&1 || fail "generated source should build once relaxed"
+    pass "warnings: generated sources compile when relaxed"
+  else
+    if cmake --build "$d" >/dev/null 2>&1; then fail "generated source should fail the strict set"; fi
+    pass "warnings: generated sources fail the strict set otherwise"
+  fi
+done
 echo "all CMake module tests passed"
