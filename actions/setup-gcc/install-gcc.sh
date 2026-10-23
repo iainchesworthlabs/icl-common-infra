@@ -27,7 +27,12 @@ APTCONF
 # each of these scripts on its own.
 apt_retry() {
     local attempt=1
-    until apt-get update && { [ "$#" -eq 0 ] || apt-get install -y --no-install-recommends "$@"; }
+    # The download is a step of its own with a time limit: a transfer that stalls on the mirror is
+    # killed and tried again, which is safe before anything is unpacked. apt's own timeouts do not fire
+    # for it. The install then reads only the local cache. A normal download of GCC takes under a minute.
+    until timeout 180 apt-get update && { [ "$#" -eq 0 ] || {
+        timeout 300 apt-get install -y --download-only --no-install-recommends "$@" &&
+            apt-get install -y --no-install-recommends "$@"; }; }
     do
         echo "::warning title=apt-get::attempt $attempt of 3 failed"
         [ "$attempt" -lt 3 ] || return 1
