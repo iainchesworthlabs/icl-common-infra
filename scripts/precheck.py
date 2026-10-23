@@ -6,6 +6,8 @@
     python3 precheck.py --base <ref>
     python3 precheck.py --root <repo>      # check another working tree
 
+They read the commits from the base to HEAD, so commit first: uncommitted work is reported but not checked.
+
 These are the checks the policy workflow runs, minus the ones that need a tool this
 machine may not have (each says SKIP and why). A push that would fail one costs a round
 trip of minutes; this costs seconds. It also prints what the gate will plan for the diff.
@@ -110,6 +112,14 @@ def main(argv=None) -> int:
         results.append(Result("clang-format", "skip", "clang-format is not installed"))
 
     print(render(results))
+    uncommitted = [line for line in git(root, "status", "--porcelain").splitlines() if line.strip()]
+    if uncommitted or not changed:
+        # The checks above read the commits from the base to HEAD. Work that is not committed yet is
+        # not in them, so a pass says nothing about it (a missing changelog fragment shows only after the commit).
+        print(f"\nNOTE  the checks read committed work only: {len(uncommitted)} path(s) have uncommitted changes"
+              if uncommitted else "\nNOTE  no commits differ from the base, so most checks had nothing to read")
+        if uncommitted:
+            print("      commit them (or stage and commit a work-in-progress commit) and run this again")
     cfg = dict(plan_gate.DEFAULT)
     plan_path = root / ".github/ci/plan.json"
     if plan_path.exists():
