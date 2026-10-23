@@ -14,7 +14,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON) |
 | `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`. | `requirements`, `upload` |
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
-| `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures, SBOM, attestations, GitHub Release, fast-forward of `main`. | `artifact-pattern` |
+| `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `draft`, `title` |
 | `zizmor.yml` | Workflow static analysis. | `min-severity` |
 | `dependabot-auto-merge.yml` | Enable auto-merge for non-major Actions and tooling updates. | secret `MERGE_QUEUE_TOKEN` |
 
@@ -108,6 +108,18 @@ program, runs Qt's deploy step so the install tree runs without Qt, and removes 
 
 `IclNotices` has the two pieces on their own (`icl_generate_notices`, `icl_write_source_info`) for a project that is
 not a Qt application. Qt's own third-party components are credited by a link to Qt's list, not copied in.
+
+## Release options
+
+The defaults suit a project that builds only packages. A project that makes more can set:
+
+- `generate-sbom: false` when the packages already include the project's own SBOM files; the workflow then adds none.
+- `public-key` (default `docs/signing-key.asc`): every signature must verify against this committed key, or the
+  release stops before it is created.
+- `verify-script`: a script in the repository, run as `script <directory> <public-key>` on the signed and attested
+  files, for checks only the project can make (for example its attestation or package layout rules). It is tried up
+  to four times, because a new attestation can take a moment to be readable.
+- `draft: true` creates the release as a draft for the owner to read and publish; `title` replaces the tag as its title.
 
 ## Release notes
 
