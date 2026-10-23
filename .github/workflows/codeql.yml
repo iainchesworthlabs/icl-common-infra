@@ -11,6 +11,8 @@ name: CodeQL
 #   preset            for manual cpp: the CMake preset to configure and build
 #   toolchain_script  repository path of a script that installs the compiler
 #   vcpkg             true to set up vcpkg before the build
+#
+# A manual build also installs the Qt kit named in .github/toolchain-versions.json, if there is one.
 
 on:
   workflow_call:
@@ -53,6 +55,11 @@ jobs:
       - name: Set up CMake
         if: matrix.build_mode == 'manual'
         uses: $/actions/setup-cmake
+
+      # Reads the qt key of .github/toolchain-versions.json; does nothing when it is empty.
+      - name: Set up Qt
+        if: matrix.build_mode == 'manual'
+        uses: $/actions/setup-qt
 
       - name: Set up vcpkg
         if: matrix.vcpkg == true
