@@ -3,6 +3,9 @@
 # Smoke tests for the CMake modules. Needs cmake and a C++ compiler.
 set -euo pipefail
 
+# The modules read these; a developer machine that sets them would change the result.
+unset ICL_VCPKG_STORE ICL_VCPKG_MIRROR ICL_QT_ROOT QT_ROOT_DIR QTDIR VCPKG_ROOT
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 modules="$(cd "$here/../../cmake" && pwd)"
 work="$(mktemp -d)"
