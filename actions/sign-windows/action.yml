@@ -6,7 +6,7 @@ description: >-
     test        sign with a leaf certificate issued by the owner's personal CA, add an
                 RFC 3161 timestamp, rename to NAME-testsigned.EXT. Such builds are
                 trusted only on machines that have the CA root installed
-                (docs/test-signing.md) and must be attached to pre-releases or
+                (docs/test-signing.md in icl-common-infra) and must be attached to pre-releases or
                 workflow artifacts only, never to a final release
     production  reserved for the signing service chosen later; fails until configured
 
@@ -68,7 +68,7 @@ runs:
           }
           'test' {
             if ([string]::IsNullOrEmpty($env:PFX_B64) -or [string]::IsNullOrEmpty($env:PFX_PASSWORD)) {
-              throw 'SIGN_WINDOWS=test needs the secrets WIN_TESTSIGN_PFX_BASE64 and WIN_TESTSIGN_PFX_PASSWORD. See docs/test-signing.md.'
+              throw 'SIGN_WINDOWS=test needs the secrets WIN_TESTSIGN_PFX_BASE64 and WIN_TESTSIGN_PFX_PASSWORD. See docs/test-signing.md in icl-common-infra.'
             }
             $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
               Sort-Object FullName -Descending | Select-Object -First 1
