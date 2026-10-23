@@ -38,7 +38,7 @@ runs:
         EXPORT_COMPILER: ${{ inputs.export-compiler }}
       run: | # zizmor: ignore[github-env] the value is the compiler major version pinned in the repository's own toolchain-versions.json
         set -euo pipefail
-        sudo --preserve-env=GCC_VERSION bash "$GITHUB_ACTION_PATH/install-gcc.sh"
+        timeout 900 sudo --preserve-env=GCC_VERSION bash "$GITHUB_ACTION_PATH/install-gcc.sh"
         if [ "$EXPORT_COMPILER" = "true" ]; then
           echo "CC=gcc-$GCC_VERSION" >> "$GITHUB_ENV"
           echo "CXX=g++-$GCC_VERSION" >> "$GITHUB_ENV"

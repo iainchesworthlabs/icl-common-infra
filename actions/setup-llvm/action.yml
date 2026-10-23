@@ -34,7 +34,7 @@ runs:
         LLVM_VERSION: ${{ steps.pin.outputs.version }}
       run: | # zizmor: ignore[github-env] the value is the compiler major version pinned in the repository's own toolchain-versions.json
         set -euo pipefail
-        sudo --preserve-env=LLVM_VERSION bash "$GITHUB_ACTION_PATH/install-llvm.sh"
+        timeout 900 sudo --preserve-env=LLVM_VERSION bash "$GITHUB_ACTION_PATH/install-llvm.sh"
         echo "CC=clang-$LLVM_VERSION" >> "$GITHUB_ENV"
         echo "CXX=clang++-$LLVM_VERSION" >> "$GITHUB_ENV"
         # ASan and UBSan call llvm-symbolizer; the versioned name is not on PATH by default.
