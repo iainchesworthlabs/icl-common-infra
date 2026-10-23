@@ -14,6 +14,13 @@ inputs:
       vcvarsall.bat with more than one candidate argument - see the step below.
     required: false
     default: x64
+  min-toolset:
+    description: >-
+      Lowest acceptable MSVC toolset, for example 14.51. Empty reads the `msvc_toolset` key of
+      .github/toolchain-versions.json, and checks nothing when that is missing too. A newer toolset
+      passes, so the pin moves up (14.52) by editing one file.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -112,3 +119,24 @@ runs:
             (New-Object System.Text.UTF8Encoding $false))
 
         Write-Host "Exported $($lines.Count) MSVC environment variable(s) to GITHUB_ENV."
+
+    - name: Check the MSVC toolset
+      if: runner.os == 'Windows'
+      shell: powershell
+      env:
+        ICL_MIN_TOOLSET: ${{ inputs.min-toolset }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $min = $env:ICL_MIN_TOOLSET
+        $file = '.github/toolchain-versions.json'
+        if ([string]::IsNullOrWhiteSpace($min) -and (Test-Path $file)) {
+            $pins = Get-Content -Raw $file | ConvertFrom-Json
+            if ($pins.PSObject.Properties.Name -contains 'msvc_toolset') { $min = $pins.msvc_toolset }
+        }
+        $actual = $env:VCToolsVersion
+        Write-Host "MSVC toolset $actual (minimum '$min')"
+        if ([string]::IsNullOrWhiteSpace($min)) { return }
+        if ([string]::IsNullOrWhiteSpace($actual)) { throw 'VCToolsVersion is not set; the MSVC environment was not loaded.' }
+        if ([version]($actual) -lt [version]("$min.0")) {
+            throw "MSVC toolset $actual is older than the minimum $min."
+        }
