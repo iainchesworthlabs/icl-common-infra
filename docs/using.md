@@ -81,6 +81,34 @@ include(IclPlatform)    # icl_platform_sources(<target>) picks src/platform/<os>
 Sanitizers, Tracy, coverage and fuzzing are mutually exclusive; the configure stops with a
 message when two are on.
 
+### Packaging a Qt application
+
+`icl_install_qt_app(<target> BUNDLE_IDENTIFIER <id> [DISPLAY_NAME <name>] [NOTICE_EXCLUDE <pkg>...])` from `IclQtApp`
+is the whole install step for a Qt application. Call it from the application's directory after `qt_add_executable`
+and `qt_add_qml_module`, with `project(... VERSION ... HOMEPAGE_URL ...)` set:
+
+```cmake
+set_target_properties(snake_app PROPERTIES OUTPUT_NAME snake)
+icl_install_qt_app(snake_app
+    BUNDLE_IDENTIFIER io.github.owner.snake
+    DISPLAY_NAME Snake
+    NOTICE_EXCLUDE catch2)          # in vcpkg.json, but not shipped
+```
+
+It sets the macOS bundle properties (the identifier, the name, and the version from `PROJECT_VERSION`), installs the
+program, runs Qt's deploy step so the install tree runs without Qt, and removes the QML debugging plugins
+(`qmltooling`) from it. It also installs, to `share/doc/<name>` and into `<name>.app/Contents/Resources/doc` on macOS:
+
+- `LICENSE` and the `LICENSES/` directory when there is one;
+- `THIRD-PARTY-NOTICES.txt`, made at configure time from the licence file vcpkg installed for each runtime
+  dependency in `vcpkg.json` (host tools and `NOTICE_EXCLUDE` packages are left out), plus an entry for Qt. A
+  dependency with no licence file stops the configure, which is the check that the notices cover every dependency;
+- `SOURCE.txt`, written when the package is installed, with the commit from git (or `GITHUB_SHA`) and the link to
+  Qt's source.
+
+`IclNotices` has the two pieces on their own (`icl_generate_notices`, `icl_write_source_info`) for a project that is
+not a Qt application. Qt's own third-party components are credited by a link to Qt's list, not copied in.
+
 ## Release notes
 
 A release always has notes from the changelog; there is no placeholder. `release-publish.yml` runs

@@ -108,4 +108,89 @@ CM
     pass "warnings: generated sources fail the strict set otherwise"
   fi
 done
+# --- notices, source information and the Qt application install -----------------
+# A stand-in for Qt's deploy command: the real one needs a Qt kit. It puts a plugin and the debugging
+# plugin directory where Qt would, so the removal of qmltooling can be checked.
+mkdir -p "$work/qtapp/vcpkg/share/zlib" "$work/qtapp/vcpkg/share/catch2" "$work/qtapp/LICENSES"
+echo "zlib licence text" > "$work/qtapp/vcpkg/share/zlib/copyright"
+echo "catch2 licence text" > "$work/qtapp/vcpkg/share/catch2/copyright"
+echo "GPL text" > "$work/qtapp/LICENSE"
+echo "GPL text" > "$work/qtapp/LICENSES/GPL-3.0-or-later.txt"
+echo 'int main() { return 0; }' > "$work/qtapp/main.cpp"
+cat > "$work/qtapp/vcpkg.json" <<JSON
+{ "name": "demo", "version": "1.2.3",
+  "dependencies": [ "zlib", "catch2", { "name": "vcpkg-cmake", "host": true }, { "name": "fmt", "platform": "!windows" } ] }
+JSON
+mkdir -p "$work/qtapp/vcpkg/share/fmt" && echo "fmt licence text" > "$work/qtapp/vcpkg/share/fmt/copyright"
+cat > "$work/qtapp/CMakeLists.txt" <<CM
+cmake_minimum_required(VERSION 3.25)
+project(demo VERSION 1.2.3 HOMEPAGE_URL "https://example.org/demo" LANGUAGES CXX)
+list(APPEND CMAKE_MODULE_PATH "$modules")
+set(Qt6_VERSION 6.12.0)
+function(qt_generate_deploy_qml_app_script)
+    cmake_parse_arguments(A "NO_UNSUPPORTED_PLATFORM_ERROR;NO_TRANSLATIONS" "TARGET;OUTPUT_SCRIPT" "" \${ARGN})
+    set(\${A_OUTPUT_SCRIPT} "\${CMAKE_CURRENT_BINARY_DIR}/fake_deploy.cmake" PARENT_SCOPE)
+    file(WRITE "\${CMAKE_CURRENT_BINARY_DIR}/fake_deploy.cmake" "
+        file(MAKE_DIRECTORY \"\\\$ENV{DESTDIR}\\\${CMAKE_INSTALL_PREFIX}/plugins/platforms\"
+                            \"\\\$ENV{DESTDIR}\\\${CMAKE_INSTALL_PREFIX}/plugins/qmltooling\")
+        file(WRITE \"\\\$ENV{DESTDIR}\\\${CMAKE_INSTALL_PREFIX}/plugins/platforms/libq.so\" x)
+        file(WRITE \"\\\$ENV{DESTDIR}\\\${CMAKE_INSTALL_PREFIX}/plugins/qmltooling/libdbg.so\" x)")
+endfunction()
+include(IclQtApp)
+add_executable(app main.cpp)
+set_target_properties(app PROPERTIES OUTPUT_NAME demo)
+icl_install_qt_app(app BUNDLE_IDENTIFIER org.example.demo DISPLAY_NAME Demo
+    NOTICE_EXCLUDE catch2)
+CM
+git -C "$work/qtapp" init -q && git -C "$work/qtapp" -c user.name=t -c user.email=t@example.org add -A \
+  && git -C "$work/qtapp" -c user.name=t -c user.email=t@example.org commit -q -m init
+commit="$(git -C "$work/qtapp" rev-parse HEAD)"
+cmake -S "$work/qtapp" -B "$work/qtapp-b" -DVCPKG_INSTALLED_DIR="$work/qtapp" -DVCPKG_TARGET_TRIPLET=vcpkg >/dev/null \
+  || fail "qt app: configure"
+cmake --build "$work/qtapp-b" >/dev/null || fail "qt app: build"
+cmake --install "$work/qtapp-b" --prefix "$work/qtapp-i" >/dev/null || fail "qt app: install"
+doc="$work/qtapp-i/share/doc/demo"
+for f in LICENSE LICENSES/GPL-3.0-or-later.txt THIRD-PARTY-NOTICES.txt SOURCE.txt; do
+  test -f "$doc/$f" || fail "qt app: $f is not installed"
+done
+test -x "$work/qtapp-i/bin/demo" || fail "qt app: program is not installed"
+test -f "$work/qtapp-i/plugins/platforms/libq.so" || fail "qt app: deployed plugins must stay"
+test ! -e "$work/qtapp-i/plugins/qmltooling" || fail "qt app: qmltooling must be removed"
+pass "qt app: install layout, licence files, qmltooling removed"
+grep -q "zlib licence text" "$doc/THIRD-PARTY-NOTICES.txt" || fail "notices: zlib"
+grep -q "fmt licence text" "$doc/THIRD-PARTY-NOTICES.txt" || fail "notices: fmt"
+if grep -q "catch2 licence text" "$doc/THIRD-PARTY-NOTICES.txt"; then fail "notices: excluded package present"; fi
+if grep -q "vcpkg-cmake" "$doc/THIRD-PARTY-NOTICES.txt"; then fail "notices: host package present"; fi
+grep -q "Qt 6.12.0" "$doc/THIRD-PARTY-NOTICES.txt" || fail "notices: Qt entry"
+grep -q "qt-everywhere-src-6.12.0.tar.xz" "$doc/THIRD-PARTY-NOTICES.txt" || fail "notices: Qt source link"
+pass "notices: runtime dependencies, Qt; no test or host packages"
+grep -q "^Commit: $commit\$" "$doc/SOURCE.txt" || fail "source info: commit"
+grep -q "^Demo 1.2.3\$" "$doc/SOURCE.txt" || fail "source info: name and version"
+grep -q "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/" "$doc/SOURCE.txt" || fail "source info: Qt source"
+pass "source info: commit, version and Qt source"
+cmake -S "$work/qtapp" -B "$work/qtapp-b" -DVCPKG_INSTALLED_DIR="$work/qtapp" -DVCPKG_TARGET_TRIPLET=vcpkg >/dev/null
+cmake --install "$work/qtapp-b" --prefix "$work/qtapp-i2" >/dev/null
+rm -rf "$work/qtapp/.git"
+GITHUB_SHA=abc123 cmake --install "$work/qtapp-b" --prefix "$work/qtapp-i3" >/dev/null
+grep -q "^Commit: abc123\$" "$work/qtapp-i3/share/doc/demo/SOURCE.txt" || fail "source info: GITHUB_SHA fallback"
+(unset GITHUB_SHA; cmake --install "$work/qtapp-b" --prefix "$work/qtapp-i4" >/dev/null)
+grep -q "^Commit: unknown\$" "$work/qtapp-i4/share/doc/demo/SOURCE.txt" || fail "source info: unknown"
+pass "source info: GITHUB_SHA, then unknown"
+rm "$work/qtapp/vcpkg/share/zlib/copyright"
+if cmake -S "$work/qtapp" -B "$work/qtapp-b2" -DVCPKG_INSTALLED_DIR="$work/qtapp" -DVCPKG_TARGET_TRIPLET=vcpkg >"$work/missing.log" 2>&1; then
+  fail "notices: a package with no licence file must stop the configure"
+fi
+tr '\n' ' ' < "$work/missing.log" | grep -q "no licence file.*zlib" || fail "notices: the error names the package"
+pass "notices: a dependency with no licence file stops the configure"
+mkdir -p "$work/noid" && cat > "$work/noid/CMakeLists.txt" <<CM
+cmake_minimum_required(VERSION 3.25)
+project(d VERSION 1.0 LANGUAGES CXX)
+list(APPEND CMAKE_MODULE_PATH "$modules")
+include(IclQtApp)
+add_executable(app main.cpp)
+icl_install_qt_app(app)
+CM
+echo 'int main() { return 0; }' > "$work/noid/main.cpp"
+if cmake -S "$work/noid" -B "$work/noid-b" >/dev/null 2>&1; then fail "qt app: BUNDLE_IDENTIFIER is required"; fi
+pass "qt app: BUNDLE_IDENTIFIER is required"
 echo "all CMake module tests passed"
