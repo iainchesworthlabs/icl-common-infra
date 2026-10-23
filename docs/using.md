@@ -81,6 +81,12 @@ include(IclPlatform)    # icl_platform_sources(<target>) picks src/platform/<os>
 Sanitizers, Tracy, coverage and fuzzing are mutually exclusive; the configure stops with a
 message when two are on.
 
+## Commit and pull request text
+
+The text check follows git: a final paragraph made only of `Word: value` lines is read as trailers, and only
+`Signed-off-by` is allowed. The rule applies to pull request bodies as well, because the squash merge uses the body as
+the commit message. A `Word: value` line anywhere else is fine. To end a body with such a line, put a sentence after it.
+
 ## Local checks
 
 ```bash

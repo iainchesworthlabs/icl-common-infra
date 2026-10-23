@@ -27,6 +27,14 @@ class TextPolicy(unittest.TestCase):
         problems = text.check_message("Fix\n\nBody.\n\nReviewed-by: X <x@y.z>", "m")
         self.assertTrue(any("not allowed" in p for p in problems))
 
+    def test_key_value_line_outside_the_last_paragraph_is_allowed(self):
+        self.assertEqual(text.check_message("Fix\n\nBody.\n\nChecked: all legs\n\nMore text.", "m"), [])
+        self.assertEqual(text.check_message("Fix\n\nChecked: all legs\nThen a sentence.", "m"), [])
+
+    def test_trailer_message_says_how_to_fix_it(self):
+        problems = text.check_message("Fix\n\nBody.\n\nChecked: all legs", "m")
+        self.assertTrue(any("closing sentence" in p for p in problems))
+
     def test_generated_line_and_tool_names(self):
         self.assertTrue(text.check_message("Fix\n\nGenerated with a tool", "m"))
         self.assertTrue(text.check_message("Fix with Claude", "m"))

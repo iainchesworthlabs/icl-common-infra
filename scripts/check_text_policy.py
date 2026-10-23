@@ -63,7 +63,8 @@ def check_message(text: str, where: str) -> list[str]:
     m = TOOL_NAMES.search(text)
     if m:
         problems.append(f"{where}: tool or assistant name '{m.group(0)}'")
-    # Trailers: the final paragraph, when every line looks like "Key: value".
+    # Trailers: the final paragraph, when every line looks like "Key: value". This is git's rule, and it applies to
+    # pull request bodies too because the squash merge uses the body as the commit message.
     paragraphs = [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
     if len(paragraphs) > 1:
         lines = [ln for ln in paragraphs[-1].splitlines() if ln.strip()]
@@ -71,7 +72,9 @@ def check_message(text: str, where: str) -> list[str]:
             for ln in lines:
                 key = ln.split(":", 1)[0].strip().lower()
                 if key not in ALLOWED_TRAILERS:
-                    problems.append(f"{where}: trailer '{ln.split(':', 1)[0]}' is not allowed (only Signed-off-by)")
+                    problems.append(
+                        f"{where}: the last paragraph is read as trailers and '{ln.split(':', 1)[0]}' is not allowed "
+                        "(only Signed-off-by). Add a closing sentence after it, or reword the line.")
     return problems
 
 
