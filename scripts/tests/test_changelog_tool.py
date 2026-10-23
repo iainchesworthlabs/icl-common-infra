@@ -44,6 +44,37 @@ class Tool(unittest.TestCase):
         self.assertEqual(t.notes(self.root, "1.0.0"), 0)
         self.assertEqual(t.notes(self.root, "9.9.9"), 1)
 
+    def capture(self, **kwargs):
+        import contextlib
+        import io
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            status = t.notes(self.root, "1.0.0", **kwargs)
+        return status, out.getvalue()
+
+    def test_pending_notes_come_from_fragments_and_change_nothing(self):
+        self.assertEqual(self.capture()[0], 1)
+        status, text = self.capture(allow_pending=True)
+        self.assertEqual(status, 0)
+        self.assertLess(text.index("### Added"), text.index("### Fixed"))
+        self.assertIn("- **Add B.** Details.", text)
+        self.assertNotIn("## [", text)
+        self.assertTrue((self.root / "changelog.d/a.fixed.md").exists())
+        self.assertFalse((self.root / "CHANGELOG.md").exists())
+
+    def test_assembled_section_wins_over_pending(self):
+        t.assemble(self.root, "1.0.0", "2026-10-22")
+        (self.root / "changelog.d/c.changed.md").write_text("**Change C.** Details.\n")
+        status, text = self.capture(allow_pending=True)
+        self.assertEqual(status, 0)
+        self.assertNotIn("Change C", text)
+
+    def test_pending_with_no_fragments_fails(self):
+        for f in (self.root / "changelog.d").glob("*.*.md"):
+            f.unlink()
+        self.assertEqual(self.capture(allow_pending=True)[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

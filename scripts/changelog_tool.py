@@ -8,8 +8,11 @@
         ### Added / Changed / Deprecated / Removed / Fixed / Security, then delete the
         fragments. changelog.d/README.md stays. Exit 1 when there are no fragments.
 
-    changelog_tool.py notes --version 1.4.0 [--root .]
-        Print the body of that version's section of CHANGELOG.md.
+    changelog_tool.py notes --version 1.4.0 [--allow-pending] [--root .]
+        Print the body of that version's section of CHANGELOG.md. With --allow-pending, when
+        there is no such section, print the notes the pending fragments in changelog.d would
+        make, without changing any file (for a release candidate, whose fragments are
+        assembled only for the final release). Exit 1 when neither exists.
 """
 
 from __future__ import annotations
@@ -36,13 +39,17 @@ def collect(root: Path):
     return groups, files
 
 
-def render_section(version: str, date: str, groups: dict) -> str:
-    out = [f"## [{version}] - {date}\n"]
+def render_groups(groups: dict) -> list[str]:
+    out = []
     for t in ORDER:
         if groups[t]:
             out.append(f"### {t.capitalize()}\n")
             out.extend(f"- {item}\n" for item in groups[t])
-    return "\n".join(out) + "\n"
+    return out
+
+
+def render_section(version: str, date: str, groups: dict) -> str:
+    return "\n".join([f"## [{version}] - {date}\n"] + render_groups(groups)) + "\n"
 
 
 def assemble(root: Path, version: str, date: str) -> int:
@@ -65,14 +72,20 @@ def assemble(root: Path, version: str, date: str) -> int:
     return 0
 
 
-def notes(root: Path, version: str) -> int:
+def notes(root: Path, version: str, allow_pending: bool = False) -> int:
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8") if (root / "CHANGELOG.md").exists() else ""
     m = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(?P<body>.*?)(?=^## \[|\Z)", text, re.MULTILINE | re.DOTALL)
-    if not m:
-        print(f"no section for {version} in CHANGELOG.md", file=sys.stderr)
-        return 1
-    print(m.group("body").strip())
-    return 0
+    if m:
+        print(m.group("body").strip())
+        return 0
+    if allow_pending:
+        groups, files = collect(root)
+        if files:
+            print("\n".join(render_groups(groups)).strip())
+            return 0
+    print(f"no section for {version} in CHANGELOG.md" + (" and no pending fragments" if allow_pending else ""),
+          file=sys.stderr)
+    return 1
 
 
 def main(argv=None) -> int:
@@ -84,10 +97,13 @@ def main(argv=None) -> int:
     a.add_argument("--root", default=".")
     n = sub.add_parser("notes")
     n.add_argument("--version", required=True)
+    n.add_argument("--allow-pending", action="store_true")
     n.add_argument("--root", default=".")
     args = ap.parse_args(argv)
     root = Path(args.root)
-    return assemble(root, args.version, args.date) if args.cmd == "assemble" else notes(root, args.version)
+    if args.cmd == "assemble":
+        return assemble(root, args.version, args.date)
+    return notes(root, args.version, args.allow_pending)
 
 
 if __name__ == "__main__":
