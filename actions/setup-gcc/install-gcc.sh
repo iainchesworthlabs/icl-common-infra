@@ -25,13 +25,25 @@ APTCONF
 # workflows' own apt steps run the same loop inline. A function in each script
 # rather than one shared file, because the fleet's Packer build uploads and runs
 # each of these scripts on its own.
+# The runner image reads the Ubuntu archive through a mirror list that picks the Azure mirror. If a
+# download from it stalled, later attempts read archive.ubuntu.com instead.
+use_main_archive() {
+    echo "::notice title=apt-get::switching to archive.ubuntu.com for the next attempt"
+    local file
+    for file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+        [ -f "$file" ] || continue
+        sed -i -e 's#mirror+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#' \
+            -e 's#http://azure.archive.ubuntu.com/ubuntu/\?#http://archive.ubuntu.com/ubuntu/#' "$file"
+    done
+}
+
 apt_retry() {
     local attempt=1
     # The download is a step of its own with a time limit: a transfer that stalls on the mirror is
     # killed and tried again, which is safe before anything is unpacked. apt's own timeouts do not fire
     # for it. The install then reads only the local cache. A normal download of GCC takes under a minute.
-    until timeout 180 apt-get update && { [ "$#" -eq 0 ] || {
-        timeout 300 apt-get install -y --download-only --no-install-recommends "$@" &&
+    until { [ "$attempt" -lt 2 ] || use_main_archive; } && timeout 180 apt-get update && { [ "$#" -eq 0 ] || {
+        timeout 240 apt-get install -y --download-only --no-install-recommends "$@" &&
             apt-get install -y --no-install-recommends "$@"; }; }
     do
         echo "::warning title=apt-get::attempt $attempt of 3 failed"
