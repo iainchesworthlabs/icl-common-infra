@@ -56,6 +56,11 @@ jobs:
         if: matrix.build_mode == 'manual'
         uses: $/actions/setup-cmake
 
+      # Reads the gcc key of .github/toolchain-versions.json; does nothing when it is empty.
+      - name: Install GCC
+        if: matrix.build_mode == 'manual'
+        uses: $/actions/setup-gcc
+
       # Reads the qt key of .github/toolchain-versions.json; does nothing when it is empty.
       - name: Set up Qt
         if: matrix.build_mode == 'manual'
