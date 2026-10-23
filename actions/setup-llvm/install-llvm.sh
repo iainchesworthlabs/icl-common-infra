@@ -15,6 +15,14 @@ LLVM_VERSION="${LLVM_VERSION:?LLVM_VERSION must name the LLVM major version}"
 # the running release; override with the env var if a base needs a different repo.
 LLVM_REPO_CODENAME="${LLVM_REPO_CODENAME:-$(lsb_release -cs)}"
 
+# Without these, a download that stalls on a mirror waits until the step is killed (seen twice on
+# ubuntu-26.04 runners: 15 to 18 minutes in the first package, where the same step takes 16 s when it works).
+cat > /etc/apt/apt.conf.d/80-icl-timeouts <<'APTCONF'
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::Retries "3";
+APTCONF
+
 # apt-get update, then apt-get install of any packages named, in up to three
 # attempts 30 s apart. Each attempt re-runs the update, so a retry reads a fresh
 # index and may reach another mirror node: Ubuntu's mirrors fail a single attempt
