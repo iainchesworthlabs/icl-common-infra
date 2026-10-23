@@ -1,7 +1,7 @@
 # C++23 Project Standard (agent brief)
 
 Owner: Iain, GitHub organisation `iainchesworthlabs` (public repositories).
-Version: 0.6, 2026-10-23 (adds what the Snake trial settled: the `std::jthread` fallback, the LLVM-based format style, enumerator prefixes, the Qt URI rule, `icl_install_qt_app`, changelog assembly before the tag, the packaging dry run and the migration document; this file now lives in `icl-common-infra` as `docs/standard.md`). Version 0.5, 2026-10-22 (adds what the bootstrap of `icl-common-infra`, the organisation `.github` repository and `icl-cpp-template` settled in practice: per-file preprocessor baseline, JSON administration files, aggregator-defined required checks, commit-pinned reusable workflows, the Dependabot merge token, and the release split). Accounts: the owner's personal account is `iainchesworth`; the organisation is `iainchesworthlabs`.
+Version: 0.7, 2026-10-23 (adds portable libraries, section 3.1). Version 0.6, 2026-10-23 (adds what the Snake trial settled: the `std::jthread` fallback, the LLVM-based format style, enumerator prefixes, the Qt URI rule, `icl_install_qt_app`, changelog assembly before the tag, the packaging dry run and the migration document; this file now lives in `icl-common-infra` as `docs/standard.md`). Version 0.5, 2026-10-22 (adds what the bootstrap of `icl-common-infra`, the organisation `.github` repository and `icl-cpp-template` settled in practice: per-file preprocessor baseline, JSON administration files, aggregator-defined required checks, commit-pinned reusable workflows, the Dependabot merge token, and the release split). Accounts: the owner's personal account is `iainchesworth`; the organisation is `iainchesworthlabs`.
 Applies to: new C++ projects, and migration of legacy projects (10 to 20 years old) into new C++23 projects.
 Reference implementations: `iclforge` (most complete), `cubeulator`, `wordjewelssolver`, `aqualink-automate`. Where this document and a reference repo differ, this document wins. Where this document is silent, copy the reference repo that has the mechanism (named in each section).
 
@@ -41,7 +41,7 @@ Items marked OPEN need an answer from the owner; the default is used until one a
 | D4 | Tracy and sanitizers | Tracy and sanitizer runtimes cannot be combined, so the Debug preset has Tracy on and sanitizers off, and the sanitizer presets have sanitizers on and Tracy off. Section 8. | `aqualink-automate/CMakeLists.txt` fails configure on the combination. |
 | D5 | Sanitizer optimisation level | Sanitizer presets build at `-O1` (`/O1` on MSVC) with frame pointers kept. Plain Debug stays at `-O0`. | The list asks for ASan/UBSan at O1. |
 | D6 | Coverage gate | Statement 90%, branch 80%, merged across unit, integration, system and UI test runs. Migrated code starts at its measured baseline and ratchets up (section 6.4). | |
-| D7 | Compiler floor | GCC 16, Clang 23, MSVC 19.51 and 19.52 (toolset 14.5x). The PR gate uses the floor versions pinned in `.github/toolchain-versions.json`. A nightly leg builds the newest release of each compiler. | |
+| D7 | Compiler floor | GCC 16, Clang 23, MSVC 19.51 and 19.52 (toolset 14.5x). The PR gate uses the floor versions pinned in `.github/toolchain-versions.json`. A nightly leg builds the newest release of each compiler. An embedded toolchain (ESP-IDF) may be older than the floor; portable libraries (section 3.1) are the only code built with it. | |
 | D8 | iOS distribution | iOS is a full target: device and simulator builds in CI, simulator tests, signed IPA export, and upload to App Store Connect (TestFlight first) from the release workflow. Distribution through the App Store is confirmed by the owner. | `cubeulator` builds iOS in CI (device, unsigned, build-only) using the `arm64-ios` triplet; no reference repo signs or uploads for iOS, so that pipeline is new. |
 | D9 | Code style | Allman braces. Locals and parameters `snake_case`; class members `m_PascalCase`; constants and enumerators `UPPER_SNAKE_CASE` (an enumerator or constant whose name is a macro in a platform or build header takes a short prefix, used for every enumerator of the enum; see section 5.2); types (classes, structs, enums, concepts) `PascalCase`; functions and namespaces `snake_case`; template parameters `PascalCase`. Exception: the properties, signals, slots and `Q_INVOKABLE` functions that QML sees are `camelCase` (the QML convention), confined to view-model classes under `apps/<app>/src/viewmodel/`. | Confirmed by the owner: PascalCase types against snake_case functions and locals keeps a type name visibly different from a variable, and `m_PascalCase` members are visibly different from locals (`m_FrameCount` against `frame_count`). Existing repos use Google style with attached braces and have no naming rules, so a migration includes one reformat commit to the template's style, listed in `.git-blame-ignore-revs` (section 5.2). |
 | D10 | Qt performance practices | Three practices, each with tests and budgets (section 7.6): (1) asynchronous loading, (2) QML compilation through `qt_add_qml_module`, (3) preloading and batching through signals. | Owner decision. `iclforge` publishes speed, memory and growth figures. |
@@ -85,6 +85,21 @@ Rules:
 - A library never depends on an application. Applications depend on libraries.
 - Public headers are under `include/<lib>/`; everything else is private to the target.
 - Static libraries by default. Shared libraries are opt-in per target and use CMake's `generate_export_header` (generated files are exempt from section 4.4).
+
+### 3.1 Portable libraries
+
+Code that is not about a platform lives in portable libraries, so it builds and behaves the same on every target, including targets that cannot run Qt or the full standard library (an ESP32 firmware, WebAssembly). Game rules, parsers, codecs, state machines, input interpretation, ranking and persistence formats belong here. A project declares each portable library in its plan and in CMake, and the rules below are checked, not just written down.
+
+1. **Dependencies.** A portable library depends only on the C++ standard library headers in its declared subset and on other portable libraries. It includes no Qt, platform, operating-system, toolkit or vcpkg-package headers, and has no `src/platform/` directory. Anything that differs by platform is passed in through an interface the application implements (storage, clock, random seed, sensor samples, log sink).
+2. **Language profile.** Built with exceptions and RTTI off (`-fno-exceptions -fno-rtti`, `/EHs-c- /GR-`). No iostream, no `std::locale`, no `std::thread` or other threading, no global mutable state, no static initialisers with side effects. Errors are returned (`std::expected`, status enums), never thrown.
+3. **Memory.** Allocation after construction is declared per library. A library that claims "no allocation" uses fixed-capacity containers and is tested to show it (a counting allocator, or a build that makes `operator new` fail the test).
+4. **Determinism where claimed.** A library whose results must be identical on every platform uses integer arithmetic or documented floating-point, its own random generator (the standard distributions are not portable across standard libraries), and carries golden tests: recorded inputs with expected outputs or state hashes, run on every platform leg of the PR gate.
+5. **Language level.** C++23, like the rest of the code. A portable library compiles with every toolchain a project ships, so where an embedded toolchain is older than the compiler floor in D7 (ESP-IDF's stock toolchain is GCC 14 where the floor is GCC 16), the library keeps to the part of C++23 and its library that all of them provide, and the documented header subset says which part. The aim is to close that gap, not to live with it: a project with an embedded target runs a spike on building that target with a floor-level compiler, and records the result. Where the spike succeeds the embedded toolchain is pinned at the floor, and the subset restriction is dropped. The embedded toolchain version is pinned in `.github/toolchain-versions.json` like the others, and a CI leg builds every portable library with it.
+6. **Direction.** Portable libraries are linked by applications, platform code and tests, never the other way round. A portable target links only portable targets; the configure step fails otherwise.
+7. **Checks.** (a) An include check lists the headers each portable library may use and fails on any other. (b) The reduced-profile build runs on every floor compiler in the PR gate. (c) The embedded-toolchain leg runs in the post-merge tier (11.2), and in the PR gate for a change to a portable library. (d) Golden tests run on every platform leg. (e) Coverage for portable libraries meets D6 without UI tests.
+8. **Placement.** The library lives under `libs/<lib>/` like any other. Its name and its place in the dependency graph are recorded in the project's `docs/architecture.md`. When a project migrates or gains a platform, code that is not platform-specific is moved into a portable library instead of copied into the new front end.
+
+The CMake helper that applies the profile (`icl_add_portable_library`), the include check and the embedded-toolchain workflow are shared infrastructure. Until they exist in `icl-common-infra`, a project applies the same rules by hand and notes where it does so.
 
 ## 4. Build system
 
@@ -316,6 +331,7 @@ Budgets in `perf-budget.json` for these three: startup to first frame, p95 frame
 | Android arm64 | `android-arm64` | NDK from the toolchain pins; signed AAB and APK |
 | iOS arm64 and simulator | `ios-arm64`, `ios-simulator` | D8 |
 | WebAssembly | `wasm-emscripten` | where sensible; section 14 |
+| ESP32 family (ESP-IDF) | `esp32p4` and similar | Portable libraries (3.1) plus a project-specific front end and drivers; toolchain from ESP-IDF or a floor-level compiler used with it, pinned in `.github/toolchain-versions.json`; the stock ESP-IDF toolchain may be below the D7 floor (section 3.1, rule 5); built in CI from Espressif's container, no hardware in CI |
 
 Platform code lives in `src/platform/<os>/` only (D14, section 4.4). The CI matrix is tiered (section 11.2) so the full matrix runs nightly and the PR gate stays short.
 
@@ -338,7 +354,7 @@ Platform code lives in `src/platform/<os>/` only (D14, section 4.4). The CI matr
 | Before a push | by hand or hook | `tools/ci/precheck.py`: the static checks that need no build, and the gate's plan for the diff |
 | PR gate | every pull request and merge-queue entry | the planner (11.5) decides the scope. Format, no-preprocessor check, SPDX/REUSE, pinning, changelog fragment, docs build, Linux GCC build and all non-perf tests, Linux Clang ASan/UBSan, `fuzz-regress`, dependency review; TSan when threading code changed |
 | Merge queue | queue entry | the gate on the merged tree, plus Windows MSVC, TSan, Qt GUI build, and the performance comparison when `src/` changed. macOS and mobile legs run here only when the planner flags a change that can affect them |
-| Post-merge | push to `develop`, one run at a time | the remaining platform legs (macOS, ARM64, Android, iOS, WebAssembly), `fuzz-short`, coverage and quality-history update |
+| Post-merge | push to `develop`, one run at a time | the remaining platform legs (macOS, ARM64, Android, iOS, WebAssembly, embedded toolchains), `fuzz-short`, coverage and quality-history update |
 | Nightly | schedule | everything: all compilers at floor and newest, TSan, MSVC ASan, mobile and WebAssembly builds, CodeQL, MSVC `/analyze`, clang-tidy, include-what-you-use, OSV-Scanner, Scorecard, fuzz-nightly, GPU UI tests, full coverage |
 
 Pattern: `iclforge/.github/ci/legs.jsonc` and `pr-gate.yml`.
@@ -563,7 +579,7 @@ Owner tasks that cannot be automated: enrol in the Apple Developer Program, crea
 A project is done when all of these hold:
 
 1. Presets for every platform in section 10 configure and build; the PR gate and a full nightly run are green.
-2. The compiler floor in D7 builds with warnings as errors.
+2. The compiler floor in D7 builds with warnings as errors. Portable libraries (3.1) also build with exceptions and RTTI off, pass the include check, and build with every embedded toolchain the project ships.
 3. The no-preprocessor check passes: no platform or compiler conditionals at all, and the remaining directive count is at or below its recorded baseline with every allowlist line carrying a reason.
 4. Coverage meets D6 (or the ratchet floor for migrated code) with UI test coverage included.
 5. ASan/UBSan, TSan and fuzz-regress run in CI; nightly fuzz runs with corpus caching.
