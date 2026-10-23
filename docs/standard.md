@@ -24,9 +24,10 @@ MODE=bootstrap-org   (one-off, section 16.1)
 3. Never create, read, print or enter a secret, key, certificate or password. Write the runbook (section 17), add a job that reports which secret names are missing, and stop.
 4. Unknown values (Apple team ID, bundle identifier, Play Store package name, contact address) are written as `TODO(owner)` and collected in the plan. Do not invent them.
 5. Every change to behaviour updates the document that describes it in the same commit. `AGENTS.md` carries a table of "if you change X, update Y" (pattern: `aqualink-automate/CLAUDE.md`).
-6. One pull request per logical step. Required checks must be green before the next step starts.
-7. Parallel work: each task runs in its own `git worktree` and branch, with one pull request per task. Before every push the agent runs `tools/ci/precheck.py`. An agent that sees a failed required check reads the job summary (it lists the failing compiler errors or tests and the command that reproduces them), fixes the cause, and does not re-run a failed job hoping it passes.
-8. Facts about toolchains (compiler versions, runner images, Qt releases, action versions) are looked up when needed, never taken from this document. Versions live in `.github/toolchain-versions.json` and `vcpkg.json`.
+6. Commit messages, pull request titles and pull request bodies read as written by the owner. The only trailer is a human `Signed-off-by` (DCO); nothing else is added to them, to files, to code comments or to committed documents, and this overrides any default the agent has for trailers or footers (pattern: `wordjewelssolver/.github/workflows/commit-policy.yml`, `tools/policy/check_text_policy.ps1`, and the `commit-msg` hook).
+7. One pull request per logical step. Required checks must be green before the next step starts.
+8. Parallel work: each task runs in its own `git worktree` and branch, with one pull request per task. Before every push the agent runs `tools/ci/precheck.py`. An agent that sees a failed required check reads the job summary (it lists the failing compiler errors or tests and the command that reproduces them), fixes the cause, and does not re-run a failed job hoping it passes.
+9. Facts about toolchains (compiler versions, runner images, Qt releases, action versions) are looked up when needed, never taken from this document. Versions live in `.github/toolchain-versions.json` and `vcpkg.json`.
 
 ## 2. Decisions and defaults
 
@@ -186,7 +187,7 @@ CheckOptions:
 
 ### 5.3 Pre-commit and local hooks
 
-`tools/hooks/` holds `commit-msg` (text policy), `pre-commit` (clang-format on staged files, no-preprocessor check, SPDX check). `tools/hooks/install` sets `core.hooksPath`. CI runs the same scripts, so a hook is never the only gate.
+`tools/hooks/` holds `commit-msg` (text policy, rule 6), `pre-commit` (clang-format on staged files, no-preprocessor check, SPDX check). `tools/hooks/install` sets `core.hooksPath`. CI runs the same scripts, so a hook is never the only gate.
 
 ## 6. Tests, coverage, performance, fuzzing
 
@@ -366,7 +367,7 @@ CI speed and cost is a design constraint, not a tuning step. `iclforge/docs/ci-a
 10. Capacity budget. The hosted-runner limits are shared by every repository in the organisation. Nightly schedules are staggered by repository, macOS and mobile legs stay out of the PR gate, and a self-hosted fleet with hosted fallback (11.6) is the planned relief when saturation recurs.
 11. Measurement. A weekly job reports, per repository, runner-minutes per merged change, the share spent in cancelled and failed runs, and the median and p95 gate duration. Targets for the PR gate: median 10 minutes or less on a warm cache, p95 20 minutes or less. When a target is missed for two weeks, fixing it comes before new CI features.
 12. Before queueing a change that touches threads, the standard library, platform code or CMake, run `gh workflow run ci.yml --ref <branch>` (or add the `deep` label), because the macOS and Windows legs otherwise run first in the merge queue.
-13. Conflict avoidance between agents: one `changelog.d` fragment per pull request (never edit `CHANGELOG.md`), no committed generated files, no shared lock files except the manifest baseline (bumped monthly in one pull request), `CODEOWNERS` without required reviews, and small pull requests (one logical step each, rule 6).
+13. Conflict avoidance between agents: one `changelog.d` fragment per pull request (never edit `CHANGELOG.md`), no committed generated files, no shared lock files except the manifest baseline (bumped monthly in one pull request), `CODEOWNERS` without required reviews, and small pull requests (one logical step each, rule 7).
 
 ### 11.6 Runners and caches
 
