@@ -8,11 +8,14 @@
         ### Added / Changed / Deprecated / Removed / Fixed / Security, then delete the
         fragments. changelog.d/README.md stays. Exit 1 when there are no fragments.
 
-    changelog_tool.py notes --version 1.4.0 [--allow-pending] [--root .]
+    changelog_tool.py notes --version 1.4.0 [--allow-pending] [--link-base URL] [--root .]
         Print the body of that version's section of CHANGELOG.md. With --allow-pending, when
         there is no such section, print the notes the pending fragments in changelog.d would
         make, without changing any file (for a release candidate, whose fragments are
-        assembled only for the final release). Exit 1 when neither exists.
+        assembled only for the final release). Exit 1 when neither exists. With --link-base,
+        every relative link target is made absolute by putting URL in front of it (a release
+        page cannot resolve a path in the repository); links with a scheme, a leading # or a
+        leading / are left alone.
 """
 
 from __future__ import annotations
@@ -72,16 +75,36 @@ def assemble(root: Path, version: str, date: str) -> int:
     return 0
 
 
-def notes(root: Path, version: str, allow_pending: bool = False) -> int:
+LINK = re.compile(r"(\]\()(?P<target>[^)\s]+)(?P<rest>[^)]*\))")
+ABSOLUTE = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*:|#|/)")
+
+
+def absolute_links(text: str, link_base: str) -> str:
+    """Put link_base in front of every relative inline link target."""
+    if not link_base:
+        return text
+
+    def fix(m):
+        target = m.group("target")
+        if ABSOLUTE.match(target):
+            return m.group(0)
+        if target.startswith("./"):
+            target = target[2:]
+        return f"{m.group(1)}{link_base}{target}{m.group('rest')}"
+
+    return LINK.sub(fix, text)
+
+
+def notes(root: Path, version: str, allow_pending: bool = False, link_base: str = "") -> int:
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8") if (root / "CHANGELOG.md").exists() else ""
     m = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(?P<body>.*?)(?=^## \[|\Z)", text, re.MULTILINE | re.DOTALL)
     if m:
-        print(m.group("body").strip())
+        print(absolute_links(m.group("body").strip(), link_base))
         return 0
     if allow_pending:
         groups, files = collect(root)
         if files:
-            print("\n".join(render_groups(groups)).strip())
+            print(absolute_links("\n".join(render_groups(groups)).strip(), link_base))
             return 0
     print(f"no section for {version} in CHANGELOG.md" + (" and no pending fragments" if allow_pending else ""),
           file=sys.stderr)
@@ -98,12 +121,13 @@ def main(argv=None) -> int:
     n = sub.add_parser("notes")
     n.add_argument("--version", required=True)
     n.add_argument("--allow-pending", action="store_true")
+    n.add_argument("--link-base", default="")
     n.add_argument("--root", default=".")
     args = ap.parse_args(argv)
     root = Path(args.root)
     if args.cmd == "assemble":
         return assemble(root, args.version, args.date)
-    return notes(root, args.version, args.allow_pending)
+    return notes(root, args.version, args.allow_pending, args.link_base)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,11 @@ inputs:
   output-file:
     description: File to write the notes to.
     required: true
+  link-base:
+    description: >-
+      Put this in front of every relative link in the notes, for example
+      https://github.com/OWNER/REPO/blob/vX.Y.Z/, because a release page cannot resolve a path in the repository.
+    default: ""
 
 runs:
   using: composite
@@ -26,11 +31,13 @@ runs:
         VERSION: ${{ inputs.version }}
         PRERELEASE: ${{ inputs.prerelease }}
         OUTPUT: ${{ inputs.output-file }}
+        LINK_BASE: ${{ inputs.link-base }}
       run: |
         set -euo pipefail
         base="${VERSION%%-*}"
         flags=()
         if [ "$PRERELEASE" = "true" ]; then flags+=(--allow-pending); fi
+        if [ -n "$LINK_BASE" ]; then flags+=(--link-base "$LINK_BASE"); fi
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/changelog_tool.py" notes --version "$base" "${flags[@]}" > "$OUTPUT"; then
           if [ "$PRERELEASE" = "true" ]; then
             echo "::error::$VERSION has no release notes: CHANGELOG.md has no '## [$base]' section and changelog.d holds no fragments."

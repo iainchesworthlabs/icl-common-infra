@@ -244,6 +244,7 @@ jobs:
           version: ${{ needs.verify.outputs.version }}
           prerelease: ${{ needs.verify.outputs.prerelease }}
           output-file: ${{ runner.temp }}/notes.md
+          link-base: https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/
 
       - name: Create the release
         shell: bash

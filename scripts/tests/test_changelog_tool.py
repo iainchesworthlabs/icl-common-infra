@@ -53,6 +53,24 @@ class Tool(unittest.TestCase):
             status = t.notes(self.root, "1.0.0", **kwargs)
         return status, out.getvalue()
 
+    def test_link_base_makes_relative_links_absolute(self):
+        base = "https://github.com/o/r/blob/v1.0.0/"
+        text = ("See [a](docs/a.md), [b](./docs/b.md#x), [c](https://example.org/c), [d](#top), [e](/abs) "
+                "and [f](docs/f.md \"title\").")
+        out = t.absolute_links(text, base)
+        self.assertIn(f"[a]({base}docs/a.md)", out)
+        self.assertIn(f"[b]({base}docs/b.md#x)", out)
+        self.assertIn(f'[f]({base}docs/f.md "title")', out)
+        for kept in ("(https://example.org/c)", "(#top)", "(/abs)"):
+            self.assertIn(kept, out)
+        self.assertEqual(t.absolute_links(text, ""), text)
+
+    def test_notes_apply_the_link_base(self):
+        (self.root / "changelog.d" / "c.changed.md").write_text("**Changed C.** See [x](docs/x.md).\n", encoding="utf-8")
+        status, text = self.capture(allow_pending=True, link_base="https://h/blob/v1/")
+        self.assertEqual(status, 0)
+        self.assertIn("[x](https://h/blob/v1/docs/x.md)", text)
+
     def test_pending_notes_come_from_fragments_and_change_nothing(self):
         self.assertEqual(self.capture()[0], 1)
         status, text = self.capture(allow_pending=True)
