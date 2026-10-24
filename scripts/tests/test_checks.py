@@ -23,6 +23,27 @@ class TextPolicy(unittest.TestCase):
     def test_coauthor_rejected(self):
         self.assertTrue(text.check_message("Fix\n\nBody.\n\nCo-Authored-By: X <x@y.z>", "m"))
 
+    def test_dependabot_coauthor_is_allowed_in_a_commit_range_only(self):
+        line = "Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>"
+        message = f"Bump a\n\nBody.\n\nSigned-off-by: dependabot[bot] <support@github.com>\n{line}"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._commit_problems(tmp, message), [])
+            other = message.replace("dependabot[bot] <49699333", "someone[bot] <49699333")
+            self.assertTrue(self._commit_problems(tmp, other))
+        self.assertTrue(text.check_message(message, "m"))
+
+    @staticmethod
+    def _commit_problems(tmp, message):
+        import subprocess
+        def git(*args):
+            subprocess.run(["git", "-C", tmp, *args], check=True, capture_output=True)
+        git("init", "-q")
+        git("-c", "user.name=t", "-c", "user.email=t@t.t", "commit", "-q", "--allow-empty", "-m", "first")
+        git("-c", "user.name=t", "-c", "user.email=t@t.t", "commit", "-q", "--allow-empty", "-m", message)
+        out = subprocess.run([sys.executable, str(Path(text.__file__)), "commits", "HEAD~1..HEAD"], cwd=tmp,
+                             capture_output=True, text=True)
+        return [] if out.returncode == 0 else [out.stdout + out.stderr]
+
     def test_other_trailer_rejected(self):
         problems = text.check_message("Fix\n\nBody.\n\nReviewed-by: X <x@y.z>", "m")
         self.assertTrue(any("not allowed" in p for p in problems))

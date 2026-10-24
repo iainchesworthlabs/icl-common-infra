@@ -35,6 +35,12 @@ ATTRIBUTION_LINES = [
 TOOL_NAMES = re.compile(r"\b(claude|anthropic|copilot|chatgpt|openai|codex|gemini)\b", re.I)
 AI_WORDS = re.compile(r"\b(ai|llm|assistant|bot|agent)\b", re.I)
 GENERATED = "'generated with/by' line"
+# GitHub adds this line to the squash commit of a Dependabot pull request that someone else queues.
+# It names the bot that wrote the change, so a commit range may carry it; every other
+# Co-authored-by line is still rejected.
+DEPENDABOT_COAUTHOR = re.compile(
+    r"^co-authored-by:\s*dependabot\[bot\]\s*<49699333\+dependabot\[bot\]@users\.noreply\.github\.com>\s*$",
+    re.I | re.M)
 # Committed test fixtures hold the strings this check looks for.
 FILE_SKIP_NAMES = {"check_text_policy.py"}
 FILE_SKIP_DIRS = {"tests"}
@@ -106,7 +112,7 @@ def main(argv=None) -> int:
     problems: list[str] = []
     if args.cmd == "commits":
         for sha, body in commits_in_range(args.range):
-            problems += check_message(body, f"commit {sha[:10]}")
+            problems += check_message(DEPENDABOT_COAUTHOR.sub("", body), f"commit {sha[:10]}")
     elif args.cmd == "text":
         body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else ""
         problems += check_message(args.title, "pull request title")
