@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Branch names: develop, main, release/x.y, gh-readonly-queue/**, dependabot/**, and
-feature|bugfix|docs|chore|agent/<lower-case-words-with-dashes-or-slashes>."""
+"""Branch names: develop, main, quality-history, gh-pages, release/x.y, gh-readonly-queue/**,
+dependabot/**, and feature|bugfix|docs|chore|agent/<lower-case-words-with-dashes-or-slashes>."""
 
 import re
 import sys
@@ -11,7 +11,8 @@ RELEASE = re.compile(r"^release/[0-9]+\.[0-9]+$")
 
 
 def ok(name: str) -> bool:
-    return (name in ("develop", "main") or name.startswith(("dependabot/", "gh-readonly-queue/"))
+    return (name in ("develop", "main", "quality-history", "gh-pages")
+            or name.startswith(("dependabot/", "gh-readonly-queue/"))
             or bool(WORK.match(name)) or bool(RELEASE.match(name)))
 
 

@@ -105,9 +105,9 @@ class Pinning(unittest.TestCase):
 class Branch(unittest.TestCase):
     def test_names(self):
         for good in ("develop", "main", "feature/a-b", "agent/fix-parser/part-2", "release/1.2",
-                     "dependabot/npm/x", "gh-readonly-queue/develop/pr-1"):
+                     "dependabot/npm/x", "gh-readonly-queue/develop/pr-1", "quality-history", "gh-pages"):
             self.assertTrue(branch.ok(good), good)
-        for bad in ("Feature/A", "fix/x", "feature/", "feature/a_b", "release/1", "wip"):
+        for bad in ("Feature/A", "fix/x", "feature/", "feature/a_b", "release/1", "wip", "quality-history/x"):
             self.assertFalse(branch.ok(bad), bad)
 
 

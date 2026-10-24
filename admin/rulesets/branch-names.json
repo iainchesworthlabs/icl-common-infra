@@ -10,6 +10,8 @@
       "exclude": [
         "refs/heads/main",
         "refs/heads/develop",
+        "refs/heads/quality-history",
+        "refs/heads/gh-pages",
         "refs/heads/feature/*",
         "refs/heads/feature/*/*",
         "refs/heads/feature/*/*/*",
