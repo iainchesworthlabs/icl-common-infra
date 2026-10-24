@@ -1,10 +1,11 @@
 # Test signing for Windows builds
 
 Test builds are signed with a leaf certificate issued by a personal certificate authority
-(CA). They are trusted only on machines that have that CA's root installed. They are not
-for release: the release workflow attaches `*-testsigned` files to pre-releases and
-workflow artifacts only. When a production signing service is chosen, `SIGN_WINDOWS`
-changes to `production` and this document is replaced.
+(CA). They are trusted only on machines that have that CA's root installed. Until a
+production certificate exists, a release may carry `*-testsigned` files, final or
+pre-release; its notes and verification page say they are test-signed. When a production
+signing service is chosen, `SIGN_WINDOWS` changes to `production` and this document is
+replaced.
 
 The `sign-windows` action renames each file it handles to `NAME-unsigned.EXT` or
 `NAME-testsigned.EXT`. A project whose programs sit inside a package under their own names
