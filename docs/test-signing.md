@@ -6,6 +6,10 @@ for release: the release workflow attaches `*-testsigned` files to pre-releases 
 workflow artifacts only. When a production signing service is chosen, `SIGN_WINDOWS`
 changes to `production` and this document is replaced.
 
+The `sign-windows` action renames each file it handles to `NAME-unsigned.EXT` or
+`NAME-testsigned.EXT`. A project whose programs sit inside a package under their own names
+passes `rename: false` and puts the action's `suffix` output on the package file instead.
+
 ## What goes where
 
 | Item | Where it lives |

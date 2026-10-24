@@ -30,10 +30,20 @@ inputs:
     description: RFC 3161 timestamp server.
     default: http://timestamp.digicert.com
 
+  rename:
+    description: >-
+      Rename each file to NAME-unsigned.EXT or NAME-testsigned.EXT. Set to false to leave the
+      names alone, for programs that live inside a package under their own names; the caller
+      then puts the suffix on the package, using the `suffix` output.
+    default: "true"
+
 outputs:
   files:
-    description: Newline-separated paths of the resulting files, after renaming.
+    description: Newline-separated paths of the resulting files, after any renaming.
     value: ${{ steps.sign.outputs.files }}
+  suffix:
+    description: "-unsigned, -testsigned, or empty for production."
+    value: ${{ steps.sign.outputs.suffix }}
 
 runs:
   using: composite
@@ -47,6 +57,7 @@ runs:
         PFX_B64: ${{ inputs.pfx-base64 }}
         PFX_PASSWORD: ${{ inputs.pfx-password }}
         TIMESTAMP_URL: ${{ inputs.timestamp-url }}
+        RENAME: ${{ inputs.rename }}
       run: |
         $ErrorActionPreference = 'Stop'
         $files = $env:FILES -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() }
@@ -54,6 +65,7 @@ runs:
         foreach ($f in $files) { if (-not (Test-Path -LiteralPath $f)) { throw "File not found: $f" } }
 
         function Rename-WithSuffix([string]$path, [string]$suffix) {
+          if ($env:RENAME -ne 'true') { return $path }
           $item = Get-Item -LiteralPath $path
           $new = Join-Path $item.DirectoryName ($item.BaseName + $suffix + $item.Extension)
           Move-Item -LiteralPath $path -Destination $new -Force
@@ -61,12 +73,15 @@ runs:
         }
 
         $results = @()
+        $suffix = ''
         switch ($env:MODE) {
           'false' {
+            $suffix = '-unsigned'
             foreach ($f in $files) { $results += Rename-WithSuffix $f '-unsigned' }
             Write-Host 'SIGN_WINDOWS=false: files left unsigned.'
           }
           'test' {
+            $suffix = '-testsigned'
             if ([string]::IsNullOrEmpty($env:PFX_B64) -or [string]::IsNullOrEmpty($env:PFX_PASSWORD)) {
               throw 'SIGN_WINDOWS=test needs the secrets WIN_TESTSIGN_PFX_BASE64 and WIN_TESTSIGN_PFX_PASSWORD. See docs/test-signing.md in icl-common-infra.'
             }
@@ -95,4 +110,5 @@ runs:
           }
           default { throw "Unknown SIGN_WINDOWS mode '$($env:MODE)'. Use false, test or production." }
         }
+        "suffix=$suffix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         "files<<EOF`n" + ($results -join "`n") + "`nEOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
