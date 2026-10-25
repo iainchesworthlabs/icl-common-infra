@@ -5,12 +5,13 @@ name: CodeQL
 # blocks a merge and a required check cannot be left waiting by a path filter. A failed
 # analysis opens or updates one `nightly-analysis` issue.
 #
-# `languages` is a JSON array of {language, build_mode, preset, toolchain_script, vcpkg}:
+# `languages` is a JSON array of {language, build_mode, preset, toolchain_script, vcpkg, queries}:
 #   language          cpp, python, javascript-typescript, java-kotlin, ...
 #   build_mode        none or manual (cpp is manual)
 #   preset            for manual cpp: the CMake preset to configure and build
 #   toolchain_script  repository path of a script that installs the compiler
 #   vcpkg             true to set up vcpkg before the build
+#   queries           query suite or packs, for example security-extended; empty for the default suite
 #
 # A manual build also installs the Qt kit named in .github/toolchain-versions.json, if there is one.
 
@@ -75,6 +76,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build_mode || 'none' }}
+          queries: ${{ matrix.queries }}
 
       - name: Build
         if: matrix.build_mode == 'manual' && matrix.preset != ''
