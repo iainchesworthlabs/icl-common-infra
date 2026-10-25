@@ -5,15 +5,17 @@ name: CodeQL
 # blocks a merge and a required check cannot be left waiting by a path filter. A failed
 # analysis opens or updates one `nightly-analysis` issue.
 #
-# `languages` is a JSON array of {language, build_mode, preset, toolchain_script, vcpkg, queries}:
+# `languages` is a JSON array of {language, build_mode, preset, toolchain_script, vcpkg, queries, skip_qt}:
 #   language          cpp, python, javascript-typescript, java-kotlin, ...
 #   build_mode        none or manual (cpp is manual)
 #   preset            for manual cpp: the CMake preset to configure and build
 #   toolchain_script  repository path of a script that installs the compiler
 #   vcpkg             true to set up vcpkg before the build
 #   queries           query suite or packs, for example security-extended; empty for the default suite
+#   skip_qt           true to leave Qt out of a manual build whose preset does not use it
 #
-# A manual build also installs the Qt kit named in .github/toolchain-versions.json, if there is one.
+# A manual build also installs the Qt kit named in .github/toolchain-versions.json, if there is one, unless the
+# entry sets skip_qt.
 
 on:
   workflow_call:
@@ -64,7 +66,7 @@ jobs:
 
       # Reads the qt key of .github/toolchain-versions.json; does nothing when it is empty.
       - name: Set up Qt
-        if: matrix.build_mode == 'manual'
+        if: matrix.build_mode == 'manual' && matrix.skip_qt != true
         uses: $/actions/setup-qt
 
       - name: Set up vcpkg
