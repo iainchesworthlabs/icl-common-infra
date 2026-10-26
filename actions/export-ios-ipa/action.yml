@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Export an iOS IPA
+description: >-
+  Archives an Xcode project with `xcodebuild archive` and exports the archive as an IPA signed for ad-hoc (or App Store)
+  distribution, using the certificate and profile that `import-ios-signing` put in place. Optionally writes the
+  manifest.plist that Safari's itms-services link reads, for an install over the air.
+
+  The project must already be configured for manual signing of its application target alone (the app's CMake does it from
+  a team and a profile name). Signing every Xcode target forces Xcode to sign static libraries and resource bundles that
+  have no bundle identifier. Run on a macOS runner.
+
+inputs:
+  project:
+    description: Path of the .xcodeproj, as CMake's Xcode generator made it.
+    required: true
+  scheme:
+    description: The scheme to archive. CMake makes none unless CMAKE_XCODE_GENERATE_SCHEME is ON.
+    required: true
+  bundle-id:
+    description: The bundle identifier of the application.
+    required: true
+  team-id:
+    description: Apple team ID (the `team-id` output of import-ios-signing).
+    required: true
+  profile-name:
+    description: The profile's name (the `profile-name` output of import-ios-signing).
+    required: true
+  method:
+    description: ad-hoc or app-store.
+    default: ad-hoc
+  output:
+    description: Path of the IPA to write, for example dist/Snake-0.2.0-ios-adhoc.ipa.
+    required: true
+  manifest-ipa-url:
+    description: >-
+      The URL the IPA will be served from. When given, a manifest.plist is written beside the IPA (it needs HTTPS, and the
+      URL may not exist yet: a release asset does not until the publish job).
+    default: ""
+  manifest-title:
+    description: The title iOS shows when it asks to install. Needed with manifest-ipa-url.
+    default: ""
+  manifest-version:
+    description: The bundle version the manifest names. Needed with manifest-ipa-url.
+    default: ""
+
+outputs:
+  ipa:
+    description: Path of the IPA.
+    value: ${{ steps.export.outputs.ipa }}
+  manifest:
+    description: Path of the manifest.plist, or empty.
+    value: ${{ steps.export.outputs.manifest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Archive and export
+      id: export
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        SCHEME: ${{ inputs.scheme }}
+        BUNDLE_ID: ${{ inputs.bundle-id }}
+        TEAM_ID: ${{ inputs.team-id }}
+        PROFILE_NAME: ${{ inputs.profile-name }}
+        METHOD: ${{ inputs.method }}
+        OUTPUT: ${{ inputs.output }}
+        MANIFEST_URL: ${{ inputs.manifest-ipa-url }}
+        MANIFEST_TITLE: ${{ inputs.manifest-title }}
+        MANIFEST_VERSION: ${{ inputs.manifest-version }}
+      run: |
+        set -euo pipefail
+        case "$METHOD" in ad-hoc | app-store) ;; *) echo "::error::method is '$METHOD': use ad-hoc or app-store."; exit 1 ;; esac
+        if [ -n "$MANIFEST_URL" ] && { [ -z "$MANIFEST_TITLE" ] || [ -z "$MANIFEST_VERSION" ]; }; then
+          echo "::error::manifest-ipa-url needs manifest-title and manifest-version."; exit 1
+        fi
+
+        archive="$RUNNER_TEMP/app.xcarchive"
+        xcodebuild archive \
+          -project "$PROJECT" \
+          -scheme "$SCHEME" \
+          -configuration Release \
+          -destination "generic/platform=iOS" \
+          -archivePath "$archive"
+        # The archive holds the application; an empty one means the scheme built something else.
+        ls "$archive/Products/Applications"/*.app > /dev/null
+
+        options="$RUNNER_TEMP/ExportOptions.plist"
+        cat > "$options" <<PLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>method</key>
+          <string>$METHOD</string>
+          <key>teamID</key>
+          <string>$TEAM_ID</string>
+          <key>signingStyle</key>
+          <string>manual</string>
+          <key>signingCertificate</key>
+          <string>Apple Distribution</string>
+          <key>provisioningProfiles</key>
+          <dict>
+            <key>$BUNDLE_ID</key>
+            <string>$PROFILE_NAME</string>
+          </dict>
+        </dict>
+        </plist>
+        PLIST
+        xcodebuild -exportArchive \
+          -archivePath "$archive" \
+          -exportPath "$RUNNER_TEMP/export" \
+          -exportOptionsPlist "$options"
+
+        mkdir -p "$(dirname "$OUTPUT")"
+        mv "$RUNNER_TEMP"/export/*.ipa "$OUTPUT"
+        echo "ipa=$OUTPUT" >> "$GITHUB_OUTPUT"
+
+        manifest=""
+        if [ -n "$MANIFEST_URL" ]; then
+          manifest="$(dirname "$OUTPUT")/manifest.plist"
+          cat > "$manifest" <<PLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>items</key>
+          <array>
+            <dict>
+              <key>assets</key>
+              <array>
+                <dict>
+                  <key>kind</key>
+                  <string>software-package</string>
+                  <key>url</key>
+                  <string>$MANIFEST_URL</string>
+                </dict>
+              </array>
+              <key>metadata</key>
+              <dict>
+                <key>bundle-identifier</key>
+                <string>$BUNDLE_ID</string>
+                <key>bundle-version</key>
+                <string>$MANIFEST_VERSION</string>
+                <key>kind</key>
+                <string>software</string>
+                <key>title</key>
+                <string>$MANIFEST_TITLE</string>
+              </dict>
+            </dict>
+          </array>
+        </dict>
+        </plist>
+        PLIST
+          plutil -lint "$manifest"
+        fi
+        echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+        ls -l "$OUTPUT"

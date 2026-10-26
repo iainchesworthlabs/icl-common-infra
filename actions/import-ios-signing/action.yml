@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Import iOS signing
+description: >-
+  Puts the Apple Distribution certificate into a keychain made for the job and the provisioning profile where Xcode
+  looks for it, and checks the profile before anything is built, so a stale or mismatched one fails here with a
+  sentence and not as an Xcode error an hour in.
+
+  The profile is read, not trusted: its name, team and App ID come out as outputs, so a caller needs no secret for them.
+  It is checked for the bundle identifier, for not having expired and, for an ad-hoc profile, for listing at least one
+  device. Only counts and names are printed, never
+  a device or a secret.
+
+  Run on a macOS runner. Call it again with `remove: true` in a step that has `if: always()` to delete the keychain and
+  the profile; a composite action cannot do that itself.
+
+inputs:
+  certificate-base64:
+    description: Base64 of the Apple Distribution certificate as a .p12 with its private key (secret IOS_DIST_CERT_P12_BASE64).
+    default: ""
+  certificate-password:
+    description: Password of the .p12 (secret IOS_DIST_CERT_PASSWORD).
+    default: ""
+  profile-base64:
+    description: Base64 of the .mobileprovision of this app (secret IOS_PROVISIONING_PROFILE_BASE64).
+    default: ""
+  bundle-id:
+    description: The bundle identifier the profile must be for.
+    default: ""
+  method:
+    description: "ad-hoc (a profile that lists devices) or app-store (one that lists none)."
+    default: ad-hoc
+  remove:
+    description: Delete the keychain and the profile made by an earlier call, and do nothing else.
+    default: "false"
+
+outputs:
+  team-id:
+    description: The Apple team the profile belongs to.
+    value: ${{ steps.import.outputs.team-id }}
+  profile-name:
+    description: The profile's name, exactly as the Apple developer portal shows it (what Xcode's specifier needs).
+    value: ${{ steps.import.outputs.profile-name }}
+  profile-uuid:
+    description: The profile's UUID.
+    value: ${{ steps.import.outputs.profile-uuid }}
+
+runs:
+  using: composite
+  steps:
+    - name: Import
+      id: import
+      shell: bash
+      env:
+        CERT_B64: ${{ inputs.certificate-base64 }}
+        CERT_PASSWORD: ${{ inputs.certificate-password }}
+        PROFILE_B64: ${{ inputs.profile-base64 }}
+        BUNDLE_ID: ${{ inputs.bundle-id }}
+        METHOD: ${{ inputs.method }}
+        REMOVE: ${{ inputs.remove }}
+      run: |
+        set -euo pipefail
+
+        if [ "$REMOVE" = true ]; then
+          if [ -n "${ICL_IOS_KEYCHAIN:-}" ]; then security delete-keychain "$ICL_IOS_KEYCHAIN" || true; fi
+          if [ -n "${ICL_IOS_PROFILE_FILE:-}" ]; then rm -f "$ICL_IOS_PROFILE_FILE"; fi
+          exit 0
+        fi
+
+        fail() { echo "::error title=iOS signing::$*"; exit 1; }
+
+        missing=""
+        [ -n "$CERT_B64" ] || missing="$missing IOS_DIST_CERT_P12_BASE64"
+        [ -n "$CERT_PASSWORD" ] || missing="$missing IOS_DIST_CERT_PASSWORD"
+        [ -n "$PROFILE_B64" ] || missing="$missing IOS_PROVISIONING_PROFILE_BASE64"
+        [ -n "$BUNDLE_ID" ] || fail "bundle-id is not given."
+        if [ -n "$missing" ]; then
+          fail "Secret(s) not set:$missing. The certificate and its password are organisation secrets (standard D16), the profile is the repository's own. docs/ios-signing.md in icl-common-infra says where each comes from."
+        fi
+        case "$METHOD" in ad-hoc | app-store) ;; *) fail "method is '$METHOD': use ad-hoc or app-store." ;; esac
+
+        keychain="$RUNNER_TEMP/icl-ios.keychain-db"
+        password="$(openssl rand -hex 24)"
+        echo "::add-mask::$password"
+        echo "ICL_IOS_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+        printf '%s' "$CERT_B64" | base64 --decode > "$RUNNER_TEMP/icl-dist.p12"
+        printf '%s' "$PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/icl.mobileprovision"
+
+        security create-keychain -p "$password" "$keychain"
+        security set-keychain-settings -lut 21600 "$keychain"
+        security unlock-keychain -p "$password" "$keychain"
+        security import "$RUNNER_TEMP/icl-dist.p12" -k "$keychain" -P "$CERT_PASSWORD" \
+          -T /usr/bin/codesign -T /usr/bin/security
+        rm -f "$RUNNER_TEMP/icl-dist.p12"
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+        # shellcheck disable=SC2046  # the existing list is words without spaces
+        security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+        identities="$(security find-identity -v -p codesigning "$keychain" | grep -c 'Apple Distribution' || true)"
+        [ "$identities" -ge 1 ] || fail "The certificate holds no 'Apple Distribution' identity with its private key (or the password is wrong). Export it from Keychain Access as a .p12 including its private key, and base64 it."
+
+        profile="$RUNNER_TEMP/icl.mobileprovision"
+        security cms -D -i "$profile" > "$RUNNER_TEMP/icl-profile.plist"
+        pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$RUNNER_TEMP/icl-profile.plist"; }
+        uuid="$(pb UUID)"
+        name="$(pb Name)"
+        team="$(pb TeamIdentifier:0)"
+        appid="$(pb Entitlements:application-identifier)"
+        expires="$(plutil -extract ExpirationDate raw -o - "$RUNNER_TEMP/icl-profile.plist")"
+        devices="$(/usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$RUNNER_TEMP/icl-profile.plist" 2>/dev/null | grep -c '^    ' || true)"
+        now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+        [ "$appid" = "$team.$BUNDLE_ID" ] || fail "The profile is for '$appid', not $team.$BUNDLE_ID. Make a profile for the App ID $BUNDLE_ID."
+        [[ "$expires" > "$now" ]] || fail "The profile expired on $expires. Make it again in the Apple developer portal and set the secret again."
+        if [ "$METHOD" = ad-hoc ]; then
+          [ "$devices" -gt 0 ] || fail "The profile lists no devices, so it is not an ad-hoc profile (a store profile cannot install on a device)."
+        else
+          [ "$devices" -eq 0 ] || fail "The profile lists $devices device(s), so it is an ad-hoc or development profile, not an App Store one."
+        fi
+
+        dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+        mkdir -p "$dir"
+        cp "$profile" "$dir/$uuid.mobileprovision"
+        echo "ICL_IOS_PROFILE_FILE=$dir/$uuid.mobileprovision" >> "$GITHUB_ENV"
+        rm -f "$RUNNER_TEMP/icl-profile.plist" "$RUNNER_TEMP/icl.mobileprovision"
+
+        {
+          echo "team-id=$team"
+          echo "profile-name=$name"
+          echo "profile-uuid=$uuid"
+        } >> "$GITHUB_OUTPUT"
+        echo "profile '$name' (team $team) is for $BUNDLE_ID, lists $devices device(s) and expires $expires"
