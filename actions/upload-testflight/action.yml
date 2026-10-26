@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Upload an iOS build to TestFlight
+description: >-
+  Validates an App Store IPA with Apple, and uploads it to App Store Connect (TestFlight) with an App Store Connect API key.
+  With `validate-only: true` it stops after the validation, which is Apple's own check of the icon, the property list, the
+  signature and the privacy declarations, without making a build for anyone.
+
+  The IPA is the output of `export-ios-ipa` with `method: app-store`. Apple refuses a build whose build number is not higher
+  than every earlier one for the same version, so the caller must make the build number grow (the number of the workflow
+  run does). Run on a macOS runner.
+
+inputs:
+  ipa:
+    description: Path of the IPA.
+    required: true
+  key-id:
+    description: Key ID of the App Store Connect API key (secret APPSTORE_API_KEY_ID).
+    default: ""
+  issuer-id:
+    description: Issuer ID of the key (secret APPSTORE_API_ISSUER_ID).
+    default: ""
+  private-key:
+    description: The contents of the key's AuthKey_<id>.p8 file (secret APPSTORE_API_PRIVATE_KEY).
+    default: ""
+  validate-only:
+    description: Validate with Apple and do not upload.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate and upload
+      shell: bash
+      env:
+        IPA: ${{ inputs.ipa }}
+        KEY_ID: ${{ inputs.key-id }}
+        ISSUER_ID: ${{ inputs.issuer-id }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+        VALIDATE_ONLY: ${{ inputs.validate-only }}
+      run: |
+        set -euo pipefail
+        missing=""
+        [ -n "$KEY_ID" ] || missing="$missing APPSTORE_API_KEY_ID"
+        [ -n "$ISSUER_ID" ] || missing="$missing APPSTORE_API_ISSUER_ID"
+        [ -n "$PRIVATE_KEY" ] || missing="$missing APPSTORE_API_PRIVATE_KEY"
+        if [ -n "$missing" ]; then
+          echo "::error title=TestFlight upload::Secret(s) not set:$missing. They are organisation secrets (standard D16); docs/ios-signing.md in icl-common-infra says where they come from."
+          exit 1
+        fi
+        [ -f "$IPA" ] || { echo "::error title=TestFlight upload::$IPA is not there."; exit 1; }
+
+        # altool looks for the key in this folder, by the name AuthKey_<Key ID>.p8, and nowhere else.
+        dir="$HOME/.appstoreconnect/private_keys"
+        key="$dir/AuthKey_$KEY_ID.p8"
+        mkdir -p "$dir"
+        umask 077
+        printf '%s\n' "$PRIVATE_KEY" > "$key"
+        trap 'rm -f "$key"' EXIT
+
+        echo "::group::Validate with Apple"
+        xcrun altool --validate-app --file "$IPA" --type ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+        echo "::endgroup::"
+        if [ "$VALIDATE_ONLY" = true ]; then
+          echo "Validated; not uploaded (validate-only)."
+          exit 0
+        fi
+        echo "::group::Upload to App Store Connect"
+        xcrun altool --upload-app --file "$IPA" --type ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+        echo "::endgroup::"
+        echo "Uploaded. Apple processes the build for a few minutes before it shows in TestFlight."

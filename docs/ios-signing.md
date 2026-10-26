@@ -9,9 +9,14 @@ optional manifest for an install over the air). They are the steps that Countdow
 the IPA's signature and profile (release workflow run 40272693096, snake). CountdownSolver ran the same steps first and has
 an IPA installed on a device. Neither Snake's IPA nor these actions have been installed on a device yet.
 
-Ad hoc means the build installs only on the devices that the provisioning profile lists. There is no App Store and no
-TestFlight in it. Distribution through the store is the same actions with `method: app-store`, and an upload step that
-is not written yet.
+There are two ways to get a build onto a device, and the same two actions make either:
+
+- **TestFlight** (`method: app-store`, then `upload-testflight`): the build goes to Apple, and the testers install it from
+  the TestFlight app. No device is registered, no UDID is in the build, nothing is hosted by the project. This is the
+  way for a public repository. See [TestFlight](#testflight).
+- **Ad hoc** (`method: ad-hoc`): the build installs only on the devices that the provisioning profile lists, and the
+  project has to hand the IPA over, for example with an `itms-services://` link to an HTTPS page. The IPA contains the
+  profile, which lists the devices' UDIDs (see [An IPA in a public repository](#an-ipa-in-a-public-repository)).
 
 ## What is shared and what is the project's
 
@@ -48,7 +53,49 @@ base64 -w0 app.mobileprovision | gh secret set IOS_PROVISIONING_PROFILE_BASE64 -
 An organisation secret can only reach a repository of the organisation. A project that is still under a personal account
 sets all three as repository secrets until it moves.
 
-## Adding a device
+## TestFlight
+
+Once per account, in App Store Connect and the developer portal:
+
+1. Accept the Apple Developer Program License Agreement if a banner asks. A free app needs no Paid Apps agreement.
+2. *Apps*, then *New App*: iOS, the bundle identifier of the project, a name that is **unique across the App Store** (it
+   is only the store name: the name under the icon comes from the app), a language, and any SKU.
+3. *Profiles*, then *Distribution*, then **App Store Connect**: for the project's App ID and the Apple Distribution
+   certificate. It lists no devices. This is the project's `IOS_PROVISIONING_PROFILE_BASE64`.
+4. *Users and Access*, then *Integrations*, then *App Store Connect API*, then *Team Keys*, then +, with the role **App
+   Manager**. Download the `.p8` once; note the Key ID and the Issuer ID (shown above the list).
+5. Organisation secrets, restricted to the projects that use them:
+   `APPSTORE_API_KEY_ID`, `APPSTORE_API_ISSUER_ID` and `APPSTORE_API_PRIVATE_KEY` (the contents of the `.p8`):
+
+   ```sh
+   gh secret set APPSTORE_API_KEY_ID --org iainchesworthlabs --visibility selected --repos <repo>,<repo>
+   gh secret set APPSTORE_API_ISSUER_ID --org iainchesworthlabs --visibility selected --repos <repo>,<repo>
+   gh secret set APPSTORE_API_PRIVATE_KEY --org iainchesworthlabs --visibility selected --repos <repo>,<repo> < AuthKey_XXXX.p8
+   ```
+
+6. In the app's *TestFlight* tab, make an *Internal Testing* group and add the testers (people with an App Store Connect
+   login, up to 100). Internal builds are available as soon as Apple has processed them, with no Beta App Review. Each
+   tester installs the TestFlight app and signs in with the same Apple ID.
+
+In the project's release job, `import-ios-signing` and `export-ios-ipa` take `method: app-store`, and then:
+
+```yaml
+- uses: iainchesworthlabs/icl-common-infra/actions/upload-testflight@<commit>
+  with:
+    ipa: dist/Example.ipa
+    key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+    issuer-id: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+    private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+    validate-only: ${{ github.ref_type != 'tag' }}   # Apple's own check; nothing uploaded
+```
+
+Apple refuses a build whose **build number** (`CFBundleVersion`) is not higher than every earlier one for that version:
+give the CMake build a build number from the workflow run number. The property list also needs
+`ITSAppUsesNonExemptEncryption` (otherwise TestFlight asks about encryption for every build), a 1024 pixel icon without
+transparency, and `UIRequiresFullScreen` for an iPad app that is not available in every orientation. Validate first
+(`validate-only: true`): Apple's checks name what is wrong, such as the icon or the privacy declarations of the libraries.
+
+## Adding a device (ad hoc only)
 
 A device installs only builds signed with a profile that lists it. Register the device, edit the ad-hoc profile to include
 it, download it, set `IOS_PROVISIONING_PROFILE_BASE64` again and build again. A build made before the device was added
@@ -121,9 +168,10 @@ sign static libraries and Qt's resource bundles, which have no bundle identifier
 ## An IPA in a public repository
 
 An ad-hoc IPA contains its provisioning profile, and the profile lists the UDIDs of the devices. Attaching it to a public
-release publishes them. A UDID is not a credential, but it identifies a device. A public project decides this on purpose:
-attach the IPA to the release (`IOS_IPA_ON_RELEASE=true`), or keep it as a workflow artifact and install it from a computer.
-An install over the air needs an HTTPS page with an `itms-services://` link to the manifest, which GitHub Pages can host.
+release publishes them. A UDID is not a credential, but it identifies a device. Neither a release asset nor a workflow artifact is private in a public repository: any signed-in GitHub account can
+download an artifact. GitHub Pages cannot be put behind a login on the Free plan, and an install over the air cannot be put
+behind one either, because iOS fetches the manifest and the IPA itself, without cookies or a login. A public project that
+cannot accept this uses TestFlight.
 
 ## Projects that have their own job
 
