@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: Export an iOS IPA
 description: >-
-  Archives an Xcode project with `xcodebuild archive` and exports the archive as an IPA signed for ad-hoc (or App Store)
+  Archives an Xcode project with `xcodebuild archive` and exports the archive as an IPA signed for ad-hoc or App Store (TestFlight)
   distribution, using the certificate and profile that `import-ios-signing` put in place. Optionally writes the
   manifest.plist that Safari's itms-services link reads, for an install over the air.
 
@@ -71,6 +71,9 @@ runs:
       run: |
         set -euo pipefail
         case "$METHOD" in ad-hoc | app-store) ;; *) echo "::error::method is '$METHOD': use ad-hoc or app-store."; exit 1 ;; esac
+        # Xcode 15 and later call the store method app-store-connect (app-store is still read, with a warning).
+        export_method="$METHOD"
+        if [ "$METHOD" = app-store ]; then export_method="app-store-connect"; fi
         if [ -n "$MANIFEST_URL" ] && { [ -z "$MANIFEST_TITLE" ] || [ -z "$MANIFEST_VERSION" ]; }; then
           echo "::error::manifest-ipa-url needs manifest-title and manifest-version."; exit 1
         fi
@@ -92,7 +95,7 @@ runs:
         <plist version="1.0">
         <dict>
           <key>method</key>
-          <string>$METHOD</string>
+          <string>$export_method</string>
           <key>teamID</key>
           <string>$TEAM_ID</string>
           <key>signingStyle</key>
