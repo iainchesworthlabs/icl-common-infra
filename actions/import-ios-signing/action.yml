@@ -61,8 +61,11 @@ runs:
         set -euo pipefail
 
         if [ "$REMOVE" = true ]; then
-          if [ -n "${ICL_IOS_KEYCHAIN:-}" ]; then security delete-keychain "$ICL_IOS_KEYCHAIN" || true; fi
-          if [ -n "${ICL_IOS_PROFILE_FILE:-}" ]; then rm -f "$ICL_IOS_PROFILE_FILE"; fi
+          # The paths are fixed, or written to a file by the import below: nothing goes through GITHUB_ENV.
+          security delete-keychain "$RUNNER_TEMP/icl-ios.keychain-db" 2>/dev/null || true
+          if [ -f "$RUNNER_TEMP/icl-ios-profile-path" ]; then
+            rm -f "$(cat "$RUNNER_TEMP/icl-ios-profile-path")" "$RUNNER_TEMP/icl-ios-profile-path"
+          fi
           exit 0
         fi
 
@@ -81,7 +84,6 @@ runs:
         keychain="$RUNNER_TEMP/icl-ios.keychain-db"
         password="$(openssl rand -hex 24)"
         echo "::add-mask::$password"
-        echo "ICL_IOS_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
         printf '%s' "$CERT_B64" | base64 --decode > "$RUNNER_TEMP/icl-dist.p12"
         printf '%s' "$PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/icl.mobileprovision"
@@ -121,7 +123,7 @@ runs:
         dir="$HOME/Library/MobileDevice/Provisioning Profiles"
         mkdir -p "$dir"
         cp "$profile" "$dir/$uuid.mobileprovision"
-        echo "ICL_IOS_PROFILE_FILE=$dir/$uuid.mobileprovision" >> "$GITHUB_ENV"
+        printf '%s' "$dir/$uuid.mobileprovision" > "$RUNNER_TEMP/icl-ios-profile-path"
         rm -f "$RUNNER_TEMP/icl-profile.plist" "$RUNNER_TEMP/icl.mobileprovision"
 
         {
