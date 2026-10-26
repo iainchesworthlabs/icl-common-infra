@@ -15,7 +15,8 @@ Organisation secrets are limited to the repositories that use them.
 | Android upload key | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | organisation |
 
 Variables, set per repository by `admin/apply.sh` (all start as `false`):
-`SIGN_WINDOWS` (`false`, `test`, `production`), `SIGN_MACOS`, `SIGN_IOS_UPLOAD`.
+`SIGN_WINDOWS` (`false`, `test`, `production`), `SIGN_MACOS`, `SIGN_IOS_UPLOAD`, `SIGN_IOS_ADHOC` (`true` builds the
+ad-hoc IPA) and `IOS_IPA_ON_RELEASE` (`true` attaches it to the release). Neither of the last two is set by `apply.sh`.
 
 Environment: `release`, with the owner as required reviewer. Created by `admin/apply.sh`.
 
