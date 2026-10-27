@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Check the glibc floor of a Linux package
+description: >-
+  Fails when a program or library in a Linux package needs a newer glibc than the oldest system the package is for
+  (Ubuntu 24.04, glibc 2.39, by default). The release builds on the newest runner, whose compiler links against the newest
+  symbol versions, and the package job starts the program on that same runner, so a function that glibc gave a new version
+  (`atan2f` in 2.43 did) makes a package that starts on the runner and on nothing older. Run it on the folder that is about to
+  become the package, on a Linux runner.
+
+inputs:
+  folder:
+    description: The folder that holds the package's files.
+    required: true
+  allowed:
+    description: The highest glibc version the package may need.
+    default: "2.39"
+
+runs:
+  using: composite
+  steps:
+    - name: Check
+      shell: bash
+      env:
+        FOLDER: ${{ inputs.folder }}
+        ALLOWED: ${{ inputs.allowed }}
+      run: bash "$GITHUB_ACTION_PATH/check.sh" "$FOLDER" "$ALLOWED"
