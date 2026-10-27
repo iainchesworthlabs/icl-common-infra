@@ -121,6 +121,22 @@ The defaults suit a project that builds only packages. A project that makes more
   to four times, because a new attestation can take a moment to be readable.
 - `draft: true` creates the release as a draft for the owner to read and publish; `title` replaces the tag as its title.
 
+## Platform steps of a project's own `release.yml`
+
+The project's `release.yml` builds each package and applies the platform's signing; these actions are the shared pieces.
+Each is pinned by commit, like the others.
+
+| Action | Runner | What it does |
+|---|---|---|
+| `sign-windows` | Windows | Authenticode signing behind `SIGN_WINDOWS` (`false`, `test`, `production`) |
+| `check-glibc-floor` | Linux | Fails the package job when a program or library in the package needs a glibc newer than 2.39 (`allowed` changes it). Call it on the folder that becomes the package. |
+| `import-ios-signing` | macOS | The Apple Distribution certificate and the provisioning profile into a temporary keychain, and the profile checked |
+| `export-ios-ipa` | macOS | `xcodebuild archive` and export, ad hoc or App Store |
+| `upload-testflight` | macOS | Apple's validation of the IPA and the upload to TestFlight |
+
+`docs/ios-signing.md` is the guide to the three iOS actions: the Apple portal, the secrets, a worked job and the
+lessons of the first project to use them. The standard's 7.7 lists what a phone version needs of the project itself.
+
 ## Release notes
 
 A release always has notes from the changelog; there is no placeholder. `release-publish.yml` runs
