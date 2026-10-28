@@ -8,7 +8,9 @@ name: Release publish
 #   publish   SHA-512 sums, detached GPG signatures (checked against the public key committed
 #             in the repository), SPDX SBOM, build-provenance attestations, an optional
 #             project verification script, GitHub Release (pre-release when the tag has a
-#             suffix; a draft when asked)
+#             suffix; a draft when asked). A project that makes its own SBOMs, or writes its
+#             own release notes from the signed files, says so with `pre-release-script`,
+#             `spdx-sbom`, `cyclonedx-sbom` and `notes-script`.
 #   promote   fast-forwards `main` to the tag with the release bot, for final releases
 #
 # The publish job runs in the `release` environment, so the owner approves each release.
@@ -44,6 +46,35 @@ on:
           Optional path of a script in the repository, run as `script <directory> <public-key>`
           on the signed files after they are attested (up to four attempts, because a new
           attestation can take a moment to be readable). A failure stops the release.
+        type: string
+        default: ""
+      pre-release-script:
+        description: >-
+          Optional path of a script in the repository, run as `bash script <dist> <version> <tag>`
+          after the packages are downloaded and before the checksums are written. It may add files
+          to <dist> (the project's SBOMs, its public key); they are summed, signed and published
+          with the packages. <version> has no leading v.
+        type: string
+        default: ""
+      spdx-sbom:
+        description: >-
+          File name, in the packages directory, of an SPDX SBOM that pre-release-script wrote. It
+          is attested as an SBOM for every package and read back: the document the attestation
+          holds must equal the file. Empty for none.
+        type: string
+        default: ""
+      cyclonedx-sbom:
+        description: Same as spdx-sbom, for a CycloneDX document.
+        type: string
+        default: ""
+      notes-script:
+        description: >-
+          Optional path of a script in the repository, run as
+          `bash script <dist> <output-file> <version> <tag> <signed>` after signing, attestation
+          and verification, that writes the release notes (<signed> is always `true` here). It
+          replaces the changelog-based notes of the release-notes action, in the verify job as
+          well as the publish job, for a project whose notes list the signed files and how to
+          check them. The script must fail when it has no notes to write.
         type: string
         default: ""
       draft:
@@ -105,6 +136,7 @@ jobs:
           if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Check the release has notes
+        if: inputs.notes-script == ''
         uses: $/actions/release-notes
         with:
           version: ${{ steps.check.outputs.version }}
@@ -148,6 +180,36 @@ jobs:
           pattern: ${{ inputs.artifact-pattern }}
           path: dist
           merge-multiple: true
+
+      - name: Run the project's pre-release script
+        if: inputs.pre-release-script != ''
+        shell: bash
+        env:
+          SCRIPT: ${{ inputs.pre-release-script }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::pre-release-script $SCRIPT does not exist"
+            exit 1
+          fi
+          bash "$SCRIPT" dist "$VERSION" "$TAG"
+
+      - name: Check the SBOM files exist
+        if: inputs.spdx-sbom != '' || inputs.cyclonedx-sbom != ''
+        shell: bash
+        env:
+          SPDX: ${{ inputs.spdx-sbom }}
+          CYCLONEDX: ${{ inputs.cyclonedx-sbom }}
+        run: |
+          set -euo pipefail
+          for f in "$SPDX" "$CYCLONEDX"; do
+            if [ -n "$f" ] && [ ! -f "dist/$f" ]; then
+              echo "::error::dist/$f is not there: pre-release-script has to write it"
+              exit 1
+            fi
+          done
 
       - name: Checksums
         shell: bash
@@ -222,6 +284,93 @@ jobs:
             dist/*
             !dist/*.asc
 
+      - name: Select the packages the SBOMs describe
+        id: packages
+        if: inputs.spdx-sbom != '' || inputs.cyclonedx-sbom != ''
+        shell: bash
+        env:
+          SPDX: ${{ inputs.spdx-sbom }}
+          CYCLONEDX: ${{ inputs.cyclonedx-sbom }}
+        run: |
+          set -euo pipefail
+          # Every file but the sums, the signatures, the SBOMs and the generated SBOM.
+          subjects="$(cd dist && find . -maxdepth 1 -type f \
+            ! -name 'SHA512SUMS*' ! -name '*.asc' ! -name 'sbom.spdx.json' \
+            ! -name "${SPDX:-.none}" ! -name "${CYCLONEDX:-.none}" -printf 'dist/%f\n' | LC_ALL=C sort)"
+          test -n "$subjects" || { echo "::error::no package to attach the SBOMs to"; exit 1; }
+          {
+            echo 'subjects<<EOF'
+            echo "$subjects"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "$subjects"
+
+      - name: Attest the SPDX SBOM
+        if: inputs.spdx-sbom != ''
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.packages.outputs.subjects }}
+          sbom-path: dist/${{ inputs.spdx-sbom }}
+
+      - name: Attest the CycloneDX SBOM
+        if: inputs.cyclonedx-sbom != ''
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.packages.outputs.subjects }}
+          sbom-path: dist/${{ inputs.cyclonedx-sbom }}
+
+      - name: Read the attestations back
+        if: inputs.spdx-sbom != '' || inputs.cyclonedx-sbom != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SPDX: ${{ inputs.spdx-sbom }}
+          CYCLONEDX: ${{ inputs.cyclonedx-sbom }}
+          SUBJECTS: ${{ steps.packages.outputs.subjects }}
+        run: |
+          set -euo pipefail
+          # A new attestation can take a moment to be readable.
+          retry() {
+            for _ in 1 2 3 4 5 6; do
+              if "$@"; then return 0; fi
+              sleep 10
+            done
+            return 1
+          }
+          first=""
+          while IFS= read -r f; do
+            if [ -z "$first" ]; then first="$f"; fi
+            if ! retry gh attestation verify "$f" --repo "$REPO" > /dev/null 2>&1; then
+              echo "::error::no verifiable attestation for $f"
+              exit 1
+            fi
+            echo "attested: $f"
+          done <<< "$SUBJECTS"
+          # The SBOM an attestation holds must be the file that is published.
+          check_sbom() {
+            local predicate="$1" file="$2" ok=false
+            for _ in 1 2 3 4 5 6; do
+              if gh attestation verify "$first" --repo "$REPO" --predicate-type "$predicate" \
+                   --format json --jq '.[0].verificationResult.statement.predicate' > "$RUNNER_TEMP/attested.json"; then
+                ok=true
+                break
+              fi
+              sleep 10
+            done
+            if [ "$ok" != "true" ]; then
+              echo "::error::no verifiable $predicate attestation for $first"
+              exit 1
+            fi
+            if ! diff <(jq -S . "$RUNNER_TEMP/attested.json") <(jq -S . "dist/$file") > /dev/null; then
+              echo "::error::the $predicate document attested for $first is not dist/$file"
+              exit 1
+            fi
+            echo "attested and identical: $file"
+          }
+          if [ -n "$SPDX" ]; then check_sbom https://spdx.dev/Document/v2.3 "$SPDX"; fi
+          if [ -n "$CYCLONEDX" ]; then check_sbom https://cyclonedx.org/bom "$CYCLONEDX"; fi
+
       - name: Run the project's verification
         if: inputs.verify-script != ''
         shell: bash
@@ -239,12 +388,30 @@ jobs:
           exit 1
 
       - name: Release notes
+        if: inputs.notes-script == ''
         uses: $/actions/release-notes
         with:
           version: ${{ needs.verify.outputs.version }}
           prerelease: ${{ needs.verify.outputs.prerelease }}
           output-file: ${{ runner.temp }}/notes.md
           link-base: https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/
+
+      - name: Release notes from the project's script
+        if: inputs.notes-script != ''
+        shell: bash
+        env:
+          SCRIPT: ${{ inputs.notes-script }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::notes-script $SCRIPT does not exist"
+            exit 1
+          fi
+          bash "$SCRIPT" dist "$RUNNER_TEMP/notes.md" "$VERSION" "$TAG" true
+          test -s "$RUNNER_TEMP/notes.md" || { echo "::error::notes-script wrote no notes"; exit 1; }
 
       - name: Create the release
         shell: bash
