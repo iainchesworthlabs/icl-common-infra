@@ -5,11 +5,16 @@ description: >-
   later). The version comes from the `version` input, else from the `cmake` key of
   `.github/toolchain-versions.json` in the workspace, else any 4.x release. Run it after the
   checkout and after setup-msvc-env, because the Visual Studio developer environment puts
-  its own CMake first on PATH.
+  its own CMake first on PATH. Ninja is pinned the same way when the project names a version:
+  from the `ninja-version` input, else the `ninja` key of the same file, else the Ninja that
+  comes with the runner image is left as it is.
 
 inputs:
   version:
     description: Exact CMake version, for example 4.4.4. Empty reads .github/toolchain-versions.json.
+    default: ""
+  ninja-version:
+    description: Exact Ninja version, for example 1.13.2. Empty reads the `ninja` key of .github/toolchain-versions.json; with no key either, the runner image's Ninja is kept.
     default: ""
 
 runs:
@@ -20,16 +25,31 @@ runs:
       with:
         python-version: "3.12"
 
-    - name: Install CMake
+    - name: Install CMake and Ninja
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
+        NINJA_VERSION: ${{ inputs.ninja-version }}
       run: |
         set -euo pipefail
+        pin() {
+          python -c "import json,sys; print(json.load(open('.github/toolchain-versions.json')).get(sys.argv[1], ''))" "$1"
+        }
         spec="$VERSION"
-        if [ -z "$spec" ] && [ -f .github/toolchain-versions.json ]; then
-          spec="$(python -c "import json; print(json.load(open('.github/toolchain-versions.json')).get('cmake', ''))")"
+        ninja_spec="$NINJA_VERSION"
+        if [ -f .github/toolchain-versions.json ]; then
+          if [ -z "$spec" ]; then spec="$(pin cmake)"; fi
+          if [ -z "$ninja_spec" ]; then ninja_spec="$(pin ninja)"; fi
         fi
         if [ -z "$spec" ]; then requirement='cmake>=4.0,<5'; else requirement="cmake==$spec"; fi
-        python -m pip install --quiet "$requirement"
+        requirements=("$requirement")
+        if [ -n "$ninja_spec" ]; then requirements+=("ninja==$ninja_spec"); fi
+        python -m pip install --quiet "${requirements[@]}"
         cmake --version
+        if [ -n "$ninja_spec" ]; then
+          ninja --version
+          if [ "$(ninja --version)" != "$ninja_spec" ]; then
+            echo "::error::ninja $(ninja --version) is first on PATH, not the pinned $ninja_spec"
+            exit 1
+          fi
+        fi
