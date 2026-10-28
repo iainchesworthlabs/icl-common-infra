@@ -14,7 +14,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON; an entry may name a CodeQL `queries` suite, or set `skip_qt` for a build that does not use Qt) |
 | `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`. | `requirements`, `upload` |
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
-| `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `draft`, `title` |
+| `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `pre-release-script`, `spdx-sbom`, `cyclonedx-sbom`, `notes-script`, `draft`, `title` |
 | `zizmor.yml` | Workflow static analysis. | `min-severity` |
 | `dependabot-auto-merge.yml` | Enable auto-merge for non-major Actions and tooling updates. | secret `MERGE_QUEUE_TOKEN` |
 
@@ -147,6 +147,20 @@ A release always has notes from the changelog; there is no placeholder. `release
 - A pre-release (`v1.2.0-rc.1`) uses that section when it exists. Otherwise its notes are the fragments still in
   `changelog.d/`, left in place, so the final release lists every change since the previous final release.
 - `changelog_tool.py notes --version 1.2.0 --allow-pending` prints the same text locally.
+
+### A project with its own SBOMs or notes
+
+Three optional inputs let a project that makes more than the shared workflow does keep that work in its own scripts:
+
+- `pre-release-script` runs as `bash script <dist> <version> <tag>` after the packages are downloaded and before the
+  checksums. It may add files to `<dist>`, such as the project's SBOMs and its public key; they are summed, signed and
+  published with the packages.
+- `spdx-sbom` and `cyclonedx-sbom` name SBOM files (in `<dist>`) that the script wrote. Each is attested as an SBOM for
+  every package, and the workflow then reads every attestation back and fails unless the document the attestation
+  holds is the file that is published. Without them the workflow only generates its own `sbom.spdx.json`.
+- `notes-script` runs as `bash script <dist> <output-file> <version> <tag> true` after signing, attestation and
+  verification, and writes the notes. It replaces `actions/release-notes` in `verify` and in `publish`, so the
+  changelog check is the script's to make, and it must fail when it has nothing to write.
 
 ## Commit and pull request text
 
