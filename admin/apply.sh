@@ -207,6 +207,13 @@ if want rulesets; then
       continue
     fi
     name="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["name"])' "$body")"
+    if [ "$name" = branch-names ] && [ -f "$config_dir/branch-prefixes.txt" ]; then
+      # The project's extra prefixes (the same file scripts/check_branch_name.py reads).
+      if ! body="$(printf '%s' "$body" | python3 "$here/../scripts/branch_prefix_excludes.py" "$config_dir/branch-prefixes.txt")"; then
+        fail "$(basename "$f"): $config_dir/branch-prefixes.txt is not valid"
+        continue
+      fi
+    fi
     id="$(printf '%s' "${existing:-[]}" | python3 -c 'import json,sys; n=sys.argv[1]; print(next((str(r["id"]) for r in json.load(sys.stdin) if r["name"]==n), ""))' "$name" 2>/dev/null)"
     if [ -n "$id" ]; then
       call PUT "repos/$repo/rulesets/$id" "$body" || fail "ruleset $name"

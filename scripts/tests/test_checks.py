@@ -110,6 +110,21 @@ class Branch(unittest.TestCase):
         for bad in ("Feature/A", "fix/x", "feature/", "feature/a_b", "release/1", "wip", "quality-history/x"):
             self.assertFalse(branch.ok(bad), bad)
 
+    def test_project_prefixes(self):
+        self.assertFalse(branch.ok("spike/gpu-probe"))
+        self.assertTrue(branch.ok("spike/gpu-probe", ["spike"]))
+        self.assertTrue(branch.ok("feature/a-b", ["spike"]))
+        self.assertFalse(branch.ok("Spike/x", ["spike"]))
+        self.assertFalse(branch.ok("spike/", ["spike"]))
+        self.assertFalse(branch.ok("spikes/x", ["spike"]))
+
+    def test_prefix_file(self):
+        self.assertEqual(branch.read_prefixes("# a note\nspike\n\nquality-run  # trailing\nspike\n"),
+                         ["spike", "quality-run"])
+        for bad in ("Spike", "feature", "dependabot", "two words", "a/b", "-x"):
+            with self.assertRaises(ValueError, msg=bad):
+                branch.read_prefixes(bad + "\n")
+
 
 class Fragment(unittest.TestCase):
     GOOD = "**Parser accepts empty input.** It returns an empty list."

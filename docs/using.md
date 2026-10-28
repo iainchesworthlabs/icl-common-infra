@@ -162,6 +162,14 @@ Three optional inputs let a project that makes more than the shared workflow doe
   verification, and writes the notes. It replaces `actions/release-notes` in `verify` and in `publish`, so the
   changelog check is the script's to make, and it must fail when it has nothing to write.
 
+## Extra branch prefixes
+
+The branch-name check and the `branch-names` ruleset allow `feature/`, `bugfix/`, `docs/`, `chore/` and `agent/`. A
+project with a working practice of its own (cubeulator's `spike/` branches) lists the extra prefixes, one lower-case word
+per line, in `.github/branch-prefixes.txt`. `scripts/check_branch_name.py` reads the file when it checks a name, and
+`admin/apply.sh` reads the same file when it builds the `branch-names` ruleset, adding the three exclude patterns each
+built-in prefix has. A prefix the standard already uses, or a line that is not a lower-case word, is an error.
+
 ## Commit and pull request text
 
 The text check follows git: a final paragraph made only of `Word: value` lines is read as trailers, and only
