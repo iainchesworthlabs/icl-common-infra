@@ -115,10 +115,24 @@ else
     echo "==> Distro archive has no clang-${LLVM_VERSION}; falling back to apt.llvm.org"
 
     # Add the LLVM apt signing key (retry — apt.llvm.org is frequently flaky and a
-    # single transient error here used to abort the whole build).
+    # single transient error here used to abort the whole build). The key is checked
+    # against the fingerprint of the Debian LLVM packagers' key before apt trusts it:
+    # the file holds exactly that primary key and no other, because signed-by trusts
+    # every key in the keyring.
+    LLVM_KEY_FINGERPRINT="6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
+    llvm_key="$(mktemp)"
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --max-time 60 \
-        https://apt.llvm.org/llvm-snapshot.gpg.key \
-        | gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg
+        https://apt.llvm.org/llvm-snapshot.gpg.key -o "$llvm_key"
+    llvm_primaries="$(gpg --batch --quiet --show-keys --with-colons --fingerprint "$llvm_key" \
+        | awk -F: '$1 == "pub" { want = 1; next } $1 == "sub" { want = 0; next } $1 == "fpr" && want { print $10; want = 0 }')"
+    if [ "$llvm_primaries" != "$LLVM_KEY_FINGERPRINT" ]; then
+        echo "ERROR: the key at apt.llvm.org is not the expected one."
+        echo "  expected the single primary key $LLVM_KEY_FINGERPRINT"
+        echo "  found    ${llvm_primaries:-nothing}"
+        exit 1
+    fi
+    gpg --batch --yes --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg "$llvm_key"
+    rm -f "$llvm_key"
 
     # Probe the ACTUAL per-version repo, with retries. The bare /<codename>/ URL
     # returns 200 even for releases that have no LLVM repo (a false signal the old
