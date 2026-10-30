@@ -4,6 +4,11 @@ name: zizmor
 # unpinned actions, excessive permissions, credential persistence). Findings go to code
 # scanning when the repository has it; the job also fails on findings of medium severity
 # and above.
+#
+# The version of zizmor is the caller's: a `zizmor==X` line in its requirements file
+# (`ci/requirements-zizmor.txt` by default), which Dependabot's pip ecosystem for that
+# directory keeps current. A repository without the file gets the version pinned below,
+# which only moves with this repository.
 
 on:
   workflow_call:
@@ -11,6 +16,10 @@ on:
       min-severity:
         type: string
         default: medium
+      requirements-file:
+        description: Requirements file of the caller that pins zizmor.
+        type: string
+        default: ci/requirements-zizmor.txt
 
 permissions: {}
 
@@ -36,8 +45,14 @@ jobs:
         shell: bash
         env:
           MIN_SEVERITY: ${{ inputs.min-severity }}
+          REQUIREMENTS: ${{ inputs.requirements-file }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet "zizmor==1.31.1"
+          if [ -f "$REQUIREMENTS" ]; then
+            python3 -m pip install --quiet -r "$REQUIREMENTS"
+          else
+            python3 -m pip install --quiet "zizmor==1.31.1"
+          fi
+          zizmor --version
           zizmor --min-severity "$MIN_SEVERITY" --format plain .

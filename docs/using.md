@@ -15,7 +15,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`. | `requirements`, `upload` |
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
 | `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `pre-release-script`, `spdx-sbom`, `cyclonedx-sbom`, `notes-script`, `draft`, `title` |
-| `zizmor.yml` | Workflow static analysis. | `min-severity` |
+| `zizmor.yml` | Workflow static analysis, at the version the caller pins in `ci/requirements-zizmor.txt` (or this repository's, without the file). | `min-severity`, `requirements-file` |
 | `dependabot-auto-merge.yml` | Enable auto-merge when every dependency a Dependabot pull request updates is a minor or patch bump in an allowed ecosystem (a grouped pull request with one major waits for a person). | `ecosystems`, `merge-method` (empty for a branch with a merge queue), secret `MERGE_QUEUE_TOKEN` |
 
 ## Planner and aggregator
@@ -210,6 +210,21 @@ failure). Which jobs gate is the caller's: `gating-jobs` and `informational-jobs
 runner, a job that is new and has never run). The calling job runs with `if: always()` after the jobs it reports on and
 needs `issues: write`, `actions: read` and `checks: read`. `dry-run: "true"` writes the summary and touches no issue. For one
 analysis engine's failure, use `report-nightly-failure`.
+
+## Actions cache hygiene
+
+A repository's Actions cache is 10 GB, and GitHub evicts the least recently used entries past that without regard for
+which took an hour to build. The `actions/prune-actions-cache` composite action keeps the quota for entries something can
+still restore: it deletes those of a ref that no longer exists (a deleted branch, a closed pull request, a deleted tag),
+and the older generations of a cache that is saved under a new key whenever its content changes (vcpkg binaries, ccache,
+the Qt kit), keeping the newest of each family per ref. `purge` deletes every entry whose key starts with a prefix, the
+reset for a vcpkg cache that has carried stale archives too long. `dry-run: "true"` only lists.
+
+The triggers are the caller's, in a workflow of its own with `permissions: actions: write` on the job: `pull_request`
+with `types: [synchronize, closed]` (not for a fork's pull request, whose token cannot delete), a push to the default
+branch, `workflow_run` after the CI workflow finished saving its caches, and `workflow_dispatch` for a dry run and a
+purge. The rules and the key shapes are in the header of `scripts/prune_actions_cache.sh`, which can also be run by hand
+(`gh` with `actions: write`, and `jq`).
 
 ## Tests in phases
 
