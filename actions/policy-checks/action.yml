@@ -2,7 +2,8 @@ name: Policy checks
 description: >-
   Runs every static check that needs no build, and runs all of them even after one
   fails so a single run lists every problem: branch name, commit and pull request
-  text, committed-file text, preprocessor policy, action pinning, changelog fragment,
+  text, committed-file text, preprocessor policy, platform isolation (when the project has
+  tools/platform-isolation.json), action pinning, changelog fragment,
   REUSE licensing, and the vcpkg baseline-in-fork rule. Needs a checkout with full
   history (fetch-depth: 0). Each failure is also written to the job summary together
   with the command that reproduces it locally.
@@ -102,6 +103,11 @@ runs:
         if [ -f tools/preprocessor-baseline.json ]; then
           run_check "preprocessor policy" "python3 scripts/check_no_preprocessor.py" \
             python3 "$SCRIPTS/check_no_preprocessor.py"
+        fi
+
+        if [ -f tools/platform-isolation.json ]; then
+          run_check "platform isolation" "python3 scripts/check_platform_isolation.py" \
+            python3 "$SCRIPTS/check_platform_isolation.py"
         fi
 
         run_check "action pinning" "python3 scripts/check_action_pinning.py" \

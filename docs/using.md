@@ -186,6 +186,19 @@ python3 path/to/icl-common-infra/scripts/precheck.py --base main
 The template's `tools/ci/precheck.py` finds a sibling checkout in `../icl-common-infra` or
 the directory named by `ICL_COMMON_INFRA`.
 
+## Platform isolation
+
+A project that keeps the code for each operating system in a directory of its own (`src/app/platform/<name>/`, with a
+`platform.cmake` per platform) can have the shared check hold that line: `scripts/check_platform_isolation.py` fails on an
+OS header or an OS query (`QSysInfo`, `Q_OS_*`, `Qt.platform`) outside the platform section, on a platform source file that
+no `platform.cmake` names, and on a test of the OS in CMake outside the selector and the fragments. The preprocessor rule
+is `check_no_preprocessor.py`'s.
+
+The check runs in `policy-checks` and in `precheck.py` when the project has `tools/platform-isolation.json`. The file may
+be `{}`: every key is optional, and the defaults are the layout of `cubeulator` (`platform_dir`, `section_prefixes`,
+`scan_roots`, `root_files`, `skip_prefixes`, `cmake_exempt`, `not_platforms`, `wired_relative_to`, `interfaces_hint`; the
+docstring of the script lists them). It replaces `cubeulator`'s PowerShell script of the same rules.
+
 ## Repository administration
 
 ```bash
