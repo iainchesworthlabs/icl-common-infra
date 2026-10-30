@@ -16,7 +16,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
 | `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `pre-release-script`, `spdx-sbom`, `cyclonedx-sbom`, `notes-script`, `draft`, `title` |
 | `zizmor.yml` | Workflow static analysis. | `min-severity` |
-| `dependabot-auto-merge.yml` | Enable auto-merge for non-major Actions and tooling updates. | secret `MERGE_QUEUE_TOKEN` |
+| `dependabot-auto-merge.yml` | Enable auto-merge when every dependency a Dependabot pull request updates is a minor or patch bump in an allowed ecosystem (a grouped pull request with one major waits for a person). | `ecosystems`, `merge-method` (empty for a branch with a merge queue), secret `MERGE_QUEUE_TOKEN` |
 
 ## Planner and aggregator
 
