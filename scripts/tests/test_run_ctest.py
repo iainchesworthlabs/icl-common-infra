@@ -21,6 +21,8 @@ FAKE = textwrap.dedent('''\
     st = json.loads(state.read_text()) if state.exists() else {}
     log = build / "Testing" / "Temporary" / "LastTestsFailed.log"
     log.parent.mkdir(parents=True, exist_ok=True)
+    with (build / "args.log").open("a") as seen:
+        seen.write(json.dumps(args) + "\\n")
     if "-N" in args:
         label = args[args.index("-L") + 1] if "-L" in args else None
         n = len(cfg.get(label, {}).get("tests", [])) if label else 0
@@ -29,7 +31,7 @@ FAKE = textwrap.dedent('''\
     if "--tests-from-file" in args:
         names = Path(args[args.index("--tests-from-file") + 1]).read_text().split()
     else:
-        label = args[args.index("-L") + 1]
+        label = args[args.index("-L") + 1] if "-L" in args else "all"
         names = cfg.get(label, {}).get("tests", [])
         if not names and "--no-tests=error" in args:
             sys.exit(8)
@@ -79,6 +81,27 @@ class RunCtest(unittest.TestCase):
         res, summary = self.run_with({"unit": {"tests": ["a", "b"]}, "fail_times": {"b": 2}})
         self.assertEqual(res.returncode, 1)
         self.assertIn("FAILED twice: b", summary)
+
+    def test_exclude_and_args_reach_ctest(self):
+        with tempfile.TemporaryDirectory() as d:
+            build = Path(d) / "build"
+            build.mkdir()
+            (build / "fake.json").write_text(json.dumps({"all": {"tests": ["a"]}}))
+            fake = Path(d) / "ctest"
+            fake.write_text(FAKE)
+            fake.chmod(0o755)
+            phases = Path(d) / "phases.json"
+            phases.write_text(json.dumps([
+                {"name": "everything but system", "label": "", "exclude": "system|slow", "jobs": 2,
+                 "args": ["-E", "flaky_name"]}]))
+            res = subprocess.run([sys.executable, str(SCRIPT), "--build-dir", str(build), "--ctest", str(fake),
+                                  "--phases", str(phases)], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            seen = [json.loads(line) for line in (build / "args.log").read_text().splitlines()]
+            first = seen[0]
+            self.assertNotIn("-L", first)
+            self.assertEqual(first[first.index("-LE") + 1], "system|slow")
+            self.assertEqual(first[first.index("-E") + 1], "flaky_name")
 
     def test_required_phase_with_no_tests_fails(self):
         res, _ = self.run_with({"ui": {"tests": ["x"]}})
