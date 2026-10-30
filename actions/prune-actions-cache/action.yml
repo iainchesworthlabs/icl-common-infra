@@ -1,0 +1,44 @@
+name: Prune Actions caches
+description: >-
+  Deletes the repository's GitHub Actions caches that nothing can restore, so the 10 GB quota
+  is spent on entries that can be: those of a ref that no longer exists (a deleted branch, a
+  closed pull request, a deleted tag), and older generations of a cache that is saved under a
+  new key whenever its content changes (vcpkg binaries, ccache, the Qt kit), keeping the newest
+  of each family per ref. Optionally purges every entry whose key starts with a prefix, the
+  reset for a vcpkg cache that has carried stale archives too long. See
+  scripts/prune_actions_cache.sh for the rules and the key shapes it knows.
+
+  The calling job needs `actions: write`, and `gh` and `jq` on the runner (both are on the
+  hosted images and on the fleet image). Triggers belong to the caller: a closed or pushed pull
+  request, a push to the default branch, a finished CI run, a manual dispatch. A run on a fork's
+  pull request cannot delete anything and should not call this.
+
+inputs:
+  dry-run:
+    description: "true to list what would be deleted and delete nothing."
+    default: "false"
+  purge:
+    description: Delete every entry whose key starts with this, on every ref. Empty for none.
+    default: ""
+  grace-minutes:
+    description: An entry read in the last this-many minutes is kept, so a job mid-restore keeps what it is downloading.
+    default: "20"
+
+runs:
+  using: composite
+  steps:
+    - name: Prune
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        SCRIPT: ${{ github.action_path }}/../../scripts/prune_actions_cache.sh
+        DRY_RUN: ${{ inputs.dry-run }}
+        PURGE: ${{ inputs.purge }}
+        GRACE: ${{ inputs.grace-minutes }}
+      run: |
+        set -euo pipefail
+        args=(--grace-minutes "$GRACE")
+        if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+        if [ -n "$PURGE" ]; then args+=(--purge "$PURGE"); fi
+        bash "$SCRIPT" "${args[@]}"
