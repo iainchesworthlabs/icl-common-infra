@@ -1,0 +1,65 @@
+name: Nightly report
+description: >-
+  Says how a nightly run went: a table in the job summary, and one standing issue (label
+  `nightly`) that is opened or commented on when a job that gates is red, and closed once a
+  night is green again. Reads the results of the nightly's own jobs (`needs`) and, when the
+  nightly dispatched a CI run, that run's jobs one by one, including the "success" job that
+  carries a failure annotation because a step in it is continue-on-error. It writes an issue
+  and nothing else, so it cannot fail a merge.
+
+  Which jobs gate is the caller's, written in its workflow: a job that is new and has never
+  run, or that cannot be trusted to be stable on a shared runner, is informational.
+
+  The calling job needs `issues: write`, `actions: read` (to read the CI run) and
+  `checks: read` (for the annotations), `gh` and `jq`, and should run with `if: always()`
+  after the jobs it reports on. This is the nightly's summary; the per-engine failure issue of
+  the analysis workflows is `report-nightly-failure`.
+
+inputs:
+  needs-json:
+    description: "toJSON(needs) of the calling job."
+    required: true
+  gating-jobs:
+    description: Space-separated names of the nightly's own jobs whose red opens the issue.
+    required: true
+  informational-jobs:
+    description: Space-separated names of the nightly's own jobs that are shown and never open an issue by themselves.
+    default: ""
+  ci-run-id:
+    description: The id of the CI run the nightly dispatched. Empty when it was not part of this run.
+    default: ""
+  informational-ci:
+    description: Regular expression for the names of that run's jobs whose red is informational. Empty for none.
+    default: ""
+  branch:
+    description: What the nightly tested, for the heading and the issue.
+    default: develop
+  issue-label:
+    description: Label of the standing issue.
+    default: nightly
+  dry-run:
+    description: "true to write the summary and print what would be done."
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Report
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        NEEDS_JSON: ${{ inputs.needs-json }}
+        GATING_JOBS: ${{ inputs.gating-jobs }}
+        INFORMATIONAL_JOBS: ${{ inputs.informational-jobs }}
+        CI_RUN_ID: ${{ inputs.ci-run-id }}
+        INFORMATIONAL_CI: ${{ inputs.informational-ci }}
+        BRANCH: ${{ inputs.branch }}
+        ISSUE_LABEL: ${{ inputs.issue-label }}
+        DRY_RUN_INPUT: ${{ inputs.dry-run }}
+        SCRIPT: ${{ github.action_path }}/../../scripts/nightly_report.sh
+      run: |
+        set -euo pipefail
+        if [ "$DRY_RUN_INPUT" = "true" ]; then export DRY_RUN=1; fi
+        bash "$SCRIPT"

@@ -199,6 +199,18 @@ be `{}`: every key is optional, and the defaults are the layout of `cubeulator` 
 `scan_roots`, `root_files`, `skip_prefixes`, `cmake_exempt`, `not_platforms`, `wired_relative_to`, `interfaces_hint`; the
 docstring of the script lists them). It replaces `cubeulator`'s PowerShell script of the same rules.
 
+## The nightly summary
+
+`actions/nightly-report` is the summary of a nightly workflow that runs several things: a table in the job summary, and one
+standing issue (label `nightly`) that is opened or commented on when a job that gates is red and closed once a night is
+green again. It reads `needs` for the nightly's own jobs and, with `ci-run-id`, the jobs of a CI run the nightly dispatched,
+including the "success" job that carries a failure annotation because a step in it is `continue-on-error` (listed as a hidden
+failure). Which jobs gate is the caller's: `gating-jobs` and `informational-jobs` name the nightly's own, and
+`informational-ci` is a regular expression for the CI jobs whose red is informational (a wall-time budget on a shared
+runner, a job that is new and has never run). The calling job runs with `if: always()` after the jobs it reports on and
+needs `issues: write`, `actions: read` and `checks: read`. `dry-run: "true"` writes the summary and touches no issue. For one
+analysis engine's failure, use `report-nightly-failure`.
+
 ## Repository administration
 
 ```bash
