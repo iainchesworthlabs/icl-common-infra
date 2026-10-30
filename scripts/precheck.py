@@ -95,6 +95,10 @@ def main(argv=None) -> int:
         results.append(run(root, "preprocessor", [py, str(HERE / "check_no_preprocessor.py")]))
     else:
         results.append(Result("preprocessor", "skip", "no tools/preprocessor-baseline.json"))
+    if (root / "tools/platform-isolation.json").exists():
+        results.append(run(root, "platform isolation", [py, str(HERE / "check_platform_isolation.py"), "--root", str(root)]))
+    else:
+        results.append(Result("platform isolation", "skip", "no tools/platform-isolation.json"))
     results.append(run(root, "action pinning", [py, str(HERE / "check_action_pinning.py")]))
     results.append(run(root, "changelog fragment", [py, str(HERE / "check_changelog_fragment.py"), "--base", base]))
     if not ((root / "REUSE.toml").exists() or (root / ".reuse").exists()):
