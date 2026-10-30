@@ -16,7 +16,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
 | `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `pre-release-script`, `spdx-sbom`, `cyclonedx-sbom`, `notes-script`, `draft`, `title` |
 | `zizmor.yml` | Workflow static analysis, at the version the caller pins in `ci/requirements-zizmor.txt` (or this repository's, without the file). | `min-severity`, `requirements-file` |
-| `dependabot-auto-merge.yml` | Enable auto-merge for non-major Actions and tooling updates. | secret `MERGE_QUEUE_TOKEN` |
+| `dependabot-auto-merge.yml` | Enable auto-merge when every dependency a Dependabot pull request updates is a minor or patch bump in an allowed ecosystem (a grouped pull request with one major waits for a person). | `ecosystems`, `merge-method` (empty for a branch with a merge queue), secret `MERGE_QUEUE_TOKEN` |
 
 ## Planner and aggregator
 
@@ -198,6 +198,18 @@ The check runs in `policy-checks` and in `precheck.py` when the project has `too
 be `{}`: every key is optional, and the defaults are the layout of `cubeulator` (`platform_dir`, `section_prefixes`,
 `scan_roots`, `root_files`, `skip_prefixes`, `cmake_exempt`, `not_platforms`, `wired_relative_to`, `interfaces_hint`; the
 docstring of the script lists them). It replaces `cubeulator`'s PowerShell script of the same rules.
+
+## The nightly summary
+
+`actions/nightly-report` is the summary of a nightly workflow that runs several things: a table in the job summary, and one
+standing issue (label `nightly`) that is opened or commented on when a job that gates is red and closed once a night is
+green again. It reads `needs` for the nightly's own jobs and, with `ci-run-id`, the jobs of a CI run the nightly dispatched,
+including the "success" job that carries a failure annotation because a step in it is `continue-on-error` (listed as a hidden
+failure). Which jobs gate is the caller's: `gating-jobs` and `informational-jobs` name the nightly's own, and
+`informational-ci` is a regular expression for the CI jobs whose red is informational (a wall-time budget on a shared
+runner, a job that is new and has never run). The calling job runs with `if: always()` after the jobs it reports on and
+needs `issues: write`, `actions: read` and `checks: read`. `dry-run: "true"` writes the summary and touches no issue. For one
+analysis engine's failure, use `report-nightly-failure`.
 
 ## Repository administration
 
