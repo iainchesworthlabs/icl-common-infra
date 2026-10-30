@@ -186,6 +186,21 @@ python3 path/to/icl-common-infra/scripts/precheck.py --base main
 The template's `tools/ci/precheck.py` finds a sibling checkout in `../icl-common-infra` or
 the directory named by `ICL_COMMON_INFRA`.
 
+## Actions cache hygiene
+
+A repository's Actions cache is 10 GB, and GitHub evicts the least recently used entries past that without regard for
+which took an hour to build. The `actions/prune-actions-cache` composite action keeps the quota for entries something can
+still restore: it deletes those of a ref that no longer exists (a deleted branch, a closed pull request, a deleted tag),
+and the older generations of a cache that is saved under a new key whenever its content changes (vcpkg binaries, ccache,
+the Qt kit), keeping the newest of each family per ref. `purge` deletes every entry whose key starts with a prefix, the
+reset for a vcpkg cache that has carried stale archives too long. `dry-run: "true"` only lists.
+
+The triggers are the caller's, in a workflow of its own with `permissions: actions: write` on the job: `pull_request`
+with `types: [synchronize, closed]` (not for a fork's pull request, whose token cannot delete), a push to the default
+branch, `workflow_run` after the CI workflow finished saving its caches, and `workflow_dispatch` for a dry run and a
+purge. The rules and the key shapes are in the header of `scripts/prune_actions_cache.sh`, which can also be run by hand
+(`gh` with `actions: write`, and `jq`).
+
 ## Repository administration
 
 ```bash
