@@ -15,7 +15,7 @@ and call this repository by commit SHA.
 | `scripts/` | Checks and tools run by the actions: preprocessor policy, commit and PR text policy, action pinning, changelog fragments, planner, pre-push check, ctest phases, coverage gate, changelog assembly. Unit tests are in `scripts/tests/`. |
 | `admin/` | `apply.sh` and the default rulesets, labels and repository settings. |
 | `tools/test-signing/` | Script that issues a Windows test-signing leaf certificate from a personal CA. |
-| `templates/` | Files that belong in other repositories (the vcpkg fork's sync workflow). |
+| `templates/` | Files that belong in other repositories: the vcpkg fork's sync workflow, and `scorecard.yml` (Scorecard cannot publish from a reusable workflow). |
 | `docs/` | How to consume this repository, the owner runbook, test signing, and `standard.md`, the C++23 project standard that projects are built to. |
 
 ## Using it
