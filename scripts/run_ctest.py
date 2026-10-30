@@ -4,7 +4,11 @@
 
     run_ctest.py --build-dir build [--config Release] [--phases phases.json] [--summary FILE]
 
-Each phase is {"name", "label" (regex or ""), "jobs" (int, 0 = all cores)}. Default phases:
+Each phase is {"name", "label" (regex or ""), "jobs" (int, 0 = all cores)}, and may also have
+"exclude" (a label regex that is left out, `ctest -LE`, for a project whose labels are
+tags it does not control and which names what to leave out instead) and "args" (a list of
+further ctest arguments, for example ["-E", "name"]). A phase with an empty label runs
+everything the other conditions leave. Default phases:
 
     parallel   label unit|integration|system   all cores
     ui         label ui                        2 jobs
@@ -62,6 +66,9 @@ def run_phase(phase: dict, args, summary: list[str]) -> tuple[bool, list[str]]:
     """Return (ok, flaky_names)."""
     build_dir = Path(args.build_dir)
     extra = ["-L", phase["label"]] if phase.get("label") else []
+    if phase.get("exclude"):
+        extra += ["-LE", phase["exclude"]]
+    extra += [str(a) for a in phase.get("args", [])]
     res = subprocess.run(ctest_cmd(args.ctest, build_dir, args.config, phase.get("jobs", 0), extra))
     if res.returncode == 0:
         summary.append(f"- {phase['name']}: passed")

@@ -226,6 +226,16 @@ branch, `workflow_run` after the CI workflow finished saving its caches, and `wo
 purge. The rules and the key shapes are in the header of `scripts/prune_actions_cache.sh`, which can also be run by hand
 (`gh` with `actions: write`, and `jq`).
 
+## Tests in phases
+
+`actions/run-ctest` runs CTest in phases, re-runs the tests that failed once, by name, and reports a test that failed and
+then passed as a flaky pass (a warning, not a failure). A test that fails twice fails the run. The default phases suit a
+project whose labels are `unit`, `integration`, `system`, `ui` and `perf`. A project with other labels gives its own
+`phases-file` (JSON): each phase has a `name`, a `label` (a regular expression for `ctest -L`, or empty), `jobs` (0 for
+all cores) and optionally `optional` (a phase that matches nothing is not an error), `exclude` (a regular expression for
+`ctest -LE`, for a project that names what to leave out because it does not control its labels, such as Catch2 tags
+promoted to labels) and `args` (further ctest arguments). The Qt Quick suites belong in a phase of their own at `jobs: 2`.
+
 ## Repository administration
 
 ```bash
