@@ -47,9 +47,12 @@ runs:
         python -m pip install --quiet "${requirements[@]}"
         cmake --version
         if [ -n "$ninja_spec" ]; then
-          ninja --version
-          if [ "$(ninja --version)" != "$ninja_spec" ]; then
-            echo "::error::ninja $(ninja --version) is first on PATH, not the pinned $ninja_spec"
+          installed="$(ninja --version)"
+          echo "$installed"
+          # The wheel is Kitware's build and reports the release it is built from with a suffix
+          # (1.13.2.git.kitware.jobserver-pipe-1 for 1.13.2): the pin names the release.
+          if [ "${installed%%.git.*}" != "$ninja_spec" ]; then
+            echo "::error::ninja $installed is first on PATH, not the pinned $ninja_spec"
             exit 1
           fi
         fi
