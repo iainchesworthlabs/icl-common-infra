@@ -23,7 +23,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 `scripts/plan_gate.py` reads the changed paths and prints `build`, `gui`, `docs_only`,
 `machinery`. The caller runs it in a `plan` job and uses the outputs as job conditions.
 The `ci-status` action takes `toJSON(needs)` and a map of job id to "the plan asked for it"
-and fails when a job failed, was cancelled, or was skipped although the plan asked for it.
+and fails when a job failed, was cancelled, or was skipped although the plan asked for it, or when a job the plan asked for is missing from `needs` (GitHub leaves out a job that never got a runner).
 Configure the planner with `.github/ci/plan.json` in the consumer.
 
 Hosted runner images carry CMake 3.x, so every job that configures a project installs CMake with

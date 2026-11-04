@@ -10,6 +10,8 @@ asked for that job. Rules:
   * a job that failed or was cancelled fails the aggregate
   * a job the plan asked for that was skipped fails the aggregate (a skipped job that
     should have run means the check silently did not happen)
+  * a job the plan asked for that has no entry in NEEDS_JSON fails the aggregate (GitHub leaves out
+    a job that never got a runner and was cancelled, so its absence is the only sign it did not run)
   * a job the plan did not ask for may be skipped
   * a job with no entry in EXPECTED_JSON is expected to run
 
@@ -35,6 +37,9 @@ def evaluate(needs: dict, expected: dict) -> list[str]:
             problems.append(f"{job}: skipped, but the plan asked for it")
         elif result == "success" and not wanted:
             pass  # ran anyway: fine
+    for job, wanted in sorted(expected.items()):
+        if wanted is True and job not in needs:
+            problems.append(f"{job}: no result, but the plan asked for it")
     return problems
 
 
