@@ -24,6 +24,12 @@ class Evaluate(unittest.TestCase):
     def test_skipped_and_not_expected_passes(self):
         self.assertEqual(c.evaluate(needs(build="skipped", policy="success"), {"build": False}), [])
 
+    def test_expected_job_missing_from_needs_fails(self):
+        self.assertEqual(c.evaluate(needs(policy="success"), {"macos": True}), ["macos: no result, but the plan asked for it"])
+
+    def test_unexpected_job_missing_from_needs_passes(self):
+        self.assertEqual(c.evaluate(needs(policy="success"), {"macos": False}), [])
+
     def test_unlisted_job_is_expected(self):
         self.assertEqual(len(c.evaluate(needs(x="skipped"), {})), 1)
 

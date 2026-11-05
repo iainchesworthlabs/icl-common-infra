@@ -2,7 +2,7 @@ name: CI status
 description: >-
   The aggregator behind the one required status check. Pass toJSON(needs) and, when a
   planner decides scope, a map of job id to whether the plan asked for it. A failed or
-  cancelled job fails the check, and so does a skipped job the plan asked for.
+  cancelled job fails the check, and so does a skipped job the plan asked for and one the plan asked for that has no result.
 
 inputs:
   needs:
