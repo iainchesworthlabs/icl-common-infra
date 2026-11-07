@@ -20,6 +20,7 @@ name: Build and test
 #   toolchain_script  repository path of a script that installs the compiler (runs first)
 #   vcpkg_features    manifest features this leg enables; also names the vcpkg cache lineage
 #   phases_file       repository path of a ctest phases JSON file
+#   timeout_minutes   minutes this leg may run; default the `timeout-minutes` input
 #
 # Secrets are not passed. A leg that needs one belongs in the release workflow.
 
@@ -40,7 +41,7 @@ jobs:
   leg:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    timeout-minutes: ${{ matrix.timeout_minutes || inputs.timeout-minutes }}
     continue-on-error: ${{ matrix.experimental == true }}
     permissions:
       contents: read

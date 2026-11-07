@@ -10,7 +10,7 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | Workflow | Purpose | Main inputs |
 |---|---|---|
 | `policy.yml` | Branch name, commit and PR text, preprocessor policy, action pinning, changelog fragment, vcpkg baseline in fork, REUSE. Runs on drafts. | `base-ref`, `runner`, `skip-changelog` |
-| `build.yml` | Build and test a list of legs with CMake presets. | `legs` (JSON, see the file header), `timeout-minutes` |
+| `build.yml` | Build and test a list of legs with CMake presets. | `legs` (JSON, see the file header; a leg may set `timeout_minutes`, default the input), `timeout-minutes` |
 | `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON; an entry may name a CodeQL `queries` suite, or set `skip_qt` for a build that does not use Qt) |
 | `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`. | `requirements`, `upload` |
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
