@@ -49,6 +49,11 @@ and comments once on each; the issue closes when the group next passes. `actions
 `contents: write`; make it `needs` the report job) then moves `refs/ci/green/<group>` forward for every group that
 passed. Neither reverts or blocks anything, and neither fails its job.
 
+`coverage_gate.py --floors-glob 'libs/*/coverage-floor.json' --floors-glob 'apps/*/coverage-floor.json'` reads one
+floor file per component (`{"line": 90, "branch": 85}`, keys left out take the default) beside the component's
+`CMakeLists.txt`, so a new library adds a file instead of a line to `tools/coverage-floors.json`, which keeps `default`.
+A component named in both places fails the gate. `--write-floors` writes a component's ratchet to its own file.
+
 Hosted runner images carry CMake 3.x, so every job that configures a project installs CMake with
 `actions/setup-cmake` (version from the `cmake` key of `.github/toolchain-versions.json`, else any 4.x) after
 the checkout and after `setup-msvc-env`. The reusable workflows do this themselves.

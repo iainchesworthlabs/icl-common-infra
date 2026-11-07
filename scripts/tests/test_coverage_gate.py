@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -55,6 +57,79 @@ class Gate(unittest.TestCase):
         rows, problems, _, _ = g.evaluate({"files": [f]}, {"components": {"libs/core": {}}})
         self.assertEqual(problems, [])
         self.assertEqual(rows[0][1], 100.0)
+
+
+class FloorFiles(unittest.TestCase):
+    def tree(self, d, root_floors, component_floors):
+        root = Path(d)
+        (root / "tools").mkdir()
+        (root / "tools" / "coverage-floors.json").write_text(json.dumps(root_floors), encoding="utf-8")
+        for comp, content in component_floors.items():
+            (root / comp).mkdir(parents=True)
+            (root / comp / "coverage-floor.json").write_text(json.dumps(content), encoding="utf-8")
+        return root
+
+    def load(self, root):
+        return g.load_floors(root / "tools" / "coverage-floors.json",
+                             ["libs/*/coverage-floor.json", "apps/*/coverage-floor.json"], root)
+
+    def test_component_files_are_merged_in(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.tree(d, {"default": {"line": 90, "branch": 80}},
+                             {"libs/core": {"line": 95, "branch": 85}, "apps/app": {}})
+            floors, sources, problems = self.load(root)
+        self.assertEqual(problems, [])
+        self.assertEqual(floors["components"], {"libs/core": {"line": 95, "branch": 85}, "apps/app": {}})
+        self.assertEqual(sorted(sources), ["apps/app", "libs/core"])
+
+    def test_a_component_in_both_places_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.tree(d, {"components": {"libs/core": {}}}, {"libs/core": {"line": 95}})
+            _, _, problems = self.load(root)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("libs/core: has more than one floor", problems[0])
+
+    def test_a_bad_file_is_a_problem_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.tree(d, {}, {"libs/core": {}})
+            (root / "libs" / "core" / "coverage-floor.json").write_text("{", encoding="utf-8")
+            _, _, problems = self.load(root)
+        self.assertEqual(len(problems), 1)
+
+    def run_main(self, root, report, *extra):
+        rep = root / "coverage.json"
+        rep.write_text(json.dumps(report), encoding="utf-8")
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return g.main(["--report", str(rep), "--floors", str(root / "tools" / "coverage-floors.json"),
+                           "--floors-glob", "libs/*/coverage-floor.json", "--root", str(root), *extra])
+
+    def test_the_gate_uses_the_component_floor(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.tree(d, {"default": {"line": 90, "branch": 80}}, {"libs/core": {"line": 99, "branch": 0}})
+            self.assertEqual(self.run_main(root, {"files": [file("libs/core/a.cpp", 95, 100)]}), 1)
+            self.assertEqual(self.run_main(root, {"files": [file("libs/core/a.cpp", 99, 100)]}), 0)
+
+    def test_a_file_outside_every_component_still_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.tree(d, {}, {"libs/core": {}})
+            self.assertEqual(self.run_main(root, {"files": [file("libs/new/a.cpp", 100, 100)]}), 1)
+
+    def test_write_floors_goes_to_the_component_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.tree(d, {"default": {"line": 90, "branch": 80}}, {"libs/core": {"line": 90, "branch": 80}})
+            self.assertEqual(self.run_main(root, {"files": [file("libs/core/a.cpp", 97, 100, 9, 10)]}, "--write-floors"), 0)
+            own = json.loads((root / "libs" / "core" / "coverage-floor.json").read_text(encoding="utf-8"))
+            top = json.loads((root / "tools" / "coverage-floors.json").read_text(encoding="utf-8"))
+        self.assertEqual(own, {"line": 97, "branch": 90})
+        self.assertNotIn("libs/core", top["components"])
+
+    def test_without_globs_nothing_changes(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = self.tree(d, {"components": {"libs/core": {}}}, {})
+            floors, sources, problems = g.load_floors(root / "tools" / "coverage-floors.json", [], root)
+        self.assertEqual((floors["components"], sources, problems), ({"libs/core": {}}, {}, []))
 
 
 if __name__ == "__main__":
