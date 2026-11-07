@@ -1,0 +1,57 @@
+name: Record CI proof
+description: >-
+  Writes the proof of this run (which groups succeeded, the object id of each barrier path at the
+  tested commit, which groups were reused) and uploads it as the `ci-proof` artifact, 14 days. A
+  later run reads it to learn the tested commit of a pull request run (docs/ci-many-agents.md
+  section 3.2). Call it from the `CI Status` job after a checkout with `persist-credentials: false`,
+  at the commit under test. It runs only infra code, needs `contents: read`, and never fails the job.
+
+inputs:
+  needs:
+    description: toJSON(needs) of the calling job.
+    required: true
+  plan-config:
+    description: Path to the consumer's plan.json (the groups and reuse sections).
+    default: .github/ci/plan.json
+  reused:
+    description: The reuse job's JSON output, when there is one. Empty otherwise.
+    default: ""
+  head-sha:
+    description: The pull request's head commit. Empty outside pull request and merge group events.
+    default: ""
+  base-sha:
+    description: The pull request's or merge group's base commit.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.12"
+
+    - name: Write the proof
+      shell: bash
+      env:
+        SCRIPT: ${{ github.action_path }}/../../scripts/ci_proof.py
+        NEEDS: ${{ inputs.needs }}
+        PLAN_CONFIG: ${{ inputs.plan-config }}
+        REUSED: ${{ inputs.reused }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        BASE_SHA: ${{ inputs.base-sha }}
+        PROOF_PATH: ${{ runner.temp }}/ci-proof/ci-proof.json
+      run: |
+        mkdir -p "$(dirname "$PROOF_PATH")"
+        # A proof is a convenience: a failure here is a warning, never a red check.
+        python3 "$SCRIPT" --needs "$NEEDS" --config "$PLAN_CONFIG" --reused "$REUSED" \
+          --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA" --out "$PROOF_PATH" \
+          || echo "::warning::could not write the CI proof"
+
+    - name: Upload the proof
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ci-proof
+        path: ${{ runner.temp }}/ci-proof/ci-proof.json
+        retention-days: 14
+        if-no-files-found: warn
