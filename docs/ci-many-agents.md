@@ -1,8 +1,8 @@
 # CI for many parallel agents: reusing results, placing the expensive legs, sizing the queue
 
-Status: proposal for owner review, 2026-11-07. Nothing here is implemented. If approved it amends
-`standard.md` sections 11.2, 11.3 and 11.5 (section 7.3 lists the edits) and becomes the plan for
-the pull requests in section 7.
+Status: design with the owner's decisions recorded (section 9), 2026-11-07. Nothing here is
+implemented. It amends `standard.md` sections 11.2, 11.3 and 11.5 (section 7.3 lists the edits) and
+is the plan for the pull requests in section 7.
 
 The owner's brief: use `changelog.d` fragments to prevent merge collisions; design CI so many
 agents can publish changes quickly; tests that passed on a pull request should be leveraged by
@@ -39,7 +39,7 @@ the merge queue.
 - Rollout is `icl-error-journaling` in shadow mode (reuse computed and logged, nothing skipped),
   then enforced, then the other consumers, `iclforge` last. Section 8.
 
-The decisions the owner needs to make are in section 9.
+The owner's decisions of 2026-11-07 are recorded in section 9.
 
 ## 2. Measurements
 
@@ -533,7 +533,7 @@ The files you named, checked in `icl-error-journaling`:
 | `docs/plan/*` | stage files edited by 5 pull requests (#4, #7, #8, #9, #11) in under two hours, all recording decisions or breakdowns. | Fix below. |
 | `docs/architecture.md`, `docs/testing.md` | 5 and 3 pull requests; #15 and #16 conflict. | Fix below. |
 
-### 5.2 Proposed layout
+### 5.2 Layout
 
 | Hotspot | Change | Effect |
 |---|---|---|
@@ -546,8 +546,8 @@ The files you named, checked in `icl-error-journaling`:
 | Fragment names | `changelog.d/<slug>.<type>.md` with `<slug>` equal to the branch slug (the part after `feature/`). In `icl-error-journaling` 4 of 6 fragments already match. Warn, do not fail, in `check_changelog_fragment.py` | Two pull requests cannot pick the same slug |
 
 The three CMake and coverage changes need `check_platform_isolation` and the preprocessor check to
-keep passing; neither reads the lists. Whether to adopt globbing is a decision for the owner
-(section 9), because it changes a habit the standard does not address either way.
+keep passing; neither reads the lists. The owner decided to adopt globbing
+(section 9, decision 4), although it changes a habit the standard does not address either way.
 
 ## 6. Queue settings and capacity
 
@@ -583,16 +583,16 @@ macOS groups to the push run (one run at a time) removes that fan-out.
 For `iclforge`, 8 entries each asking for 6 heavy hosted jobs (Linux GCC, Windows MSVC, static
 checks, two comparisons, ESP32 image) is 48 against 20. The measured queue wall time (median 18,
 p90 36.8, max 68 minutes, against a longest job of 18 minutes at the median) is that backlog. Its
-`max_entries_to_build` should come down to 4 until the reuse rate is measured (section 8.2); the
-standard already says "start at 4" (12.2).
+`max_entries_to_build` stays at 8 until the reuse rate is measured (section 8.2; decision 7 of
+section 9), although the standard says "start at 4" (12.2); it is retuned from the measurement.
 
 ### 6.2 Settings
 
-| Setting | `icl-error-journaling` now | Proposed | `iclforge` now | Proposed | Reason |
+| Setting | `icl-error-journaling` now | After | `iclforge` now | After | Reason |
 |---|---|---|---|---|---|
 | `merge_method` | SQUASH | keep | MERGE | keep | Section 3.1 relies on the entry commit landing unchanged |
 | `grouping_strategy` | ALLGREEN | keep | ALLGREEN | keep | A failing entry is named by its own `CI Status`; with reuse a rebuilt entry costs little |
-| `max_entries_to_build` | 4 | 4 | 8 | 4, then retune from section 8.2 | Section 6.1 |
+| `max_entries_to_build` | 4 | 4 | 8 | 8, then retune from section 8.2 | Section 6.1 |
 | `max_entries_to_merge` | 5 | 5 | 5 | 5 | Groups of 5 mean one push run per group of merges |
 | `min_entries_to_merge` | 1 | 1 | 1 | 1 | |
 | `min_entries_to_merge_wait_minutes` | 1 | 1 | 5 | 1 | A fixed 5 is a large share of an 18-minute latency (`branch-protection.md`) |
@@ -629,7 +629,7 @@ bad parent, a changed barrier, a missing artifact, an HTTP error, a stale proof)
 | 7 | `build.yml`: optional per-leg `timeout_minutes`. | `.github/workflows/build.yml` |
 | 8 | Metrics: `ci_metrics.py` and `templates/ci-metrics.yml` (the weekly job of standard 11.5 rule 11). | `scripts/ci_metrics.py`, `templates/`, tests |
 | 9 | Administration and standard: `integration_id` on the required checks and the queue parameters of section 6.2 in `admin/rulesets/`; `docs/standard.md` 0.15 (section 7.3); `docs/using.md`. | `admin/rulesets/*.json`, `docs/` |
-| 10 | Tag `v0.2.0`. The README says a change to an input is a major version; these are optional inputs on a 0.x line, so a minor bump is proposed, and the owner can choose `v1.0.0` instead. | tag (owner) |
+| 10 | Tag `v0.2.0-beta.1` (owner decision, section 9). The README says a change to an input is a major version; these are optional inputs on a pre-1.0 line. | tag (owner) |
 
 Steps 2, 3 and 4 add no behaviour until a consumer calls them.
 
@@ -651,7 +651,7 @@ Other consumers repeat steps 1 to 5 (Dependabot moves the pin; `plan.json` and `
 `iclforge` has its own planner and an `_ci-*` workflow set, so it uses the `--planner` adapter and
 `legs.jsonc`, which already holds `tier` per leg.
 
-### 7.3 Edits to `standard.md` when this is approved
+### 7.3 Edits to `standard.md` when this is merged and implemented
 
 | Section | Edit |
 |---|---|
@@ -674,7 +674,7 @@ Other consumers repeat steps 1 to 5 (Dependabot moves the pin; `plan.json` and `
 | 1 | `icl-error-journaling`, infra steps 1 to 4 and consumer steps 1 to 3: proofs recorded, `reuse` in shadow mode. | 50 queue entries or 7 days, whichever is later; shadow disagreements all explained; zero false reuse (a group the job would have skipped that failed when it ran) |
 | 2 | Consumer step 4: `CI_REUSE_MODE=on` for `merge_group` and `push`; `mark-green` and `report-red`. | 2 weeks at the targets below |
 | 3 | `virtual-serial-studio` first (the most active: 100 `ci.yml` runs between 2026-11-06 and 2026-11-07), then `arinc-data-loader`, `cubeulator`, `snapandspell`, `countdownsolver`, each shadow first. A code search finds the infra `ci-status` action in all five `ci.yml` files; whether each also uses the infra planner was not checked. A Dependabot bump of the pin brings the actions. | Each repeats phase 1 and 2 on a shorter clock (20 entries) |
-| 4 | `iclforge`, with the `--planner` adapter and its own groups, after its queue size is reduced (section 6.2). It has the largest saving and the largest chance of a wrong skip. | Phase 1 and 2 clocks as for the first repository |
+| 4 | `iclforge`, with the `--planner` adapter and its own groups, after its queue timeout and wait are changed (section 6.2). It has the largest saving and the largest chance of a wrong skip. | Phase 1 and 2 clocks as for the first repository |
 | 5 | Layout changes (section 5.2) and standard 0.15 land with phase 2. | |
 
 `aqualink-automate` has no `merge_group` run in `ci.yml` and is out of scope until it has a queue.
@@ -702,34 +702,30 @@ Other consumers repeat steps 1 to 5 (Dependabot moves the pin; `plan.json` and `
 Rule of the standard, kept: when a target is missed for two weeks, fixing it comes before new CI
 features.
 
-## 9. Decisions for the owner
+## 9. Decisions
 
-Ranked by how much they change the outcome.
+Recorded from the owner's acceptance of the recommendations in the first version of this section.
 
-1. **Where macOS and iOS are gated.** The design moves them from the queue to the post-merge run,
-   unless the entry touches Apple-specific paths or carries `deep`. The consequence is that a
-   change that breaks only macOS can land, and is found minutes later with the pull request named.
-   The alternative is to keep the macOS groups in the queue: it costs 5.4 macOS minutes per code
-   change and, at four entries, up to 12 macOS jobs against a limit of 5. Recommendation: post-merge.
-2. **Whether pull request runs may be reused.** A `pull_request` run tests GitHub's merge commit,
-   and only the run's own artifact says which commit that was (it is verified against the API, but
-   not stated by it). The alternative is to accept only proofs whose tested commit the API states
-   (dispatch, queue and push runs), or to make pull request jobs check out the head instead of
-   the merge; both lose most of the reuse that the pull request gate provides. This decision also
-   covers the two security settings: `integration_id: 15368` on every required check in every
-   repository (an owner action, section 3.7), and no reuse for fork pull requests.
-   Recommendation: accept pull request runs with the checks of section 3.3, and apply the
-   integration setting regardless of what else is decided.
-3. **What a red `develop` does.** The design reports and names suspects and does not block the
-   queue or revert. The alternative is to stop the queue while any group's green ref is behind by
-   more than N merges, or to revert automatically (needs a token that can start workflows, which
-   `GITHUB_TOKEN` cannot give). Recommendation: report only, and revisit if the false-reuse or
-   time-to-fix metrics are poor.
-4. Whether to adopt `file(GLOB ... CONFIGURE_DEPENDS)` for library and test sources (section 5.2).
-   It removes the commonest conflict but relaxes explicit source lists.
-5. Whether the version bump is `v0.2.0` or `v1.0.0` (README rule on inputs).
-6. The `xcode-27` experimental leg: nightly only (proposed), or also in the post-merge run.
-7. Whether `max_entries_to_build` for `iclforge` goes from 8 to 4 before reuse is measured.
+1. **Where macOS and iOS are gated.** macOS and iOS are gated in the post-merge run, unless the
+   entry touches Apple-specific paths or carries `deep`. A change that breaks only macOS can
+   therefore land, and is found minutes later with the pull request named. Keeping the macOS groups
+   in the queue would cost 5.4 macOS minutes per code change and, at four entries, up to 12 macOS
+   jobs against a limit of 5. (owner, 2026-11-07)
+2. **Reuse of pull request runs.** Pull request runs may be reused, with the checks of section 3.3
+   (a `pull_request` run tests GitHub's merge commit, and only the run's own artifact says which
+   commit that was). There is no reuse for fork pull requests. Setting `integration_id: 15368` on
+   every required check in every repository is an owner action (section 3.7) that is applied
+   regardless of the other decisions. (owner, 2026-11-07)
+3. **What a red `develop` does.** A red `develop` reports and names suspects; it does not block the
+   queue or revert. Revisit if the false-reuse or time-to-fix metrics (section 8.2) are poor.
+   (owner, 2026-11-07)
+4. **Globbing.** Adopt `file(GLOB ... CONFIGURE_DEPENDS)` for library and test sources
+   (section 5.2). (owner, 2026-11-07)
+5. **Version bump.** The version bump is `v0.2.0-beta.1` (pre-1.0; the infra is at v0.1.x).
+   (owner, 2026-11-07)
+6. **The `xcode-27` experimental leg.** It runs nightly only. (owner, 2026-11-07)
+7. **`max_entries_to_build` for `iclforge`.** It stays at 8 until reuse is measured (section 8.2).
+   (owner, 2026-11-07)
 
 ## 10. Not proposed, and risks
 
@@ -749,4 +745,4 @@ Ranked by how much they change the outcome.
   `iclforge` window is 2.5 days during which its post-merge run was almost always red. Both should
   be re-taken for phase 0.
 
-This document changes no workflow and no setting; merging it only records the proposal for review.
+This document changes no workflow and no setting; merging it records the design and the owner's decisions of section 9.
