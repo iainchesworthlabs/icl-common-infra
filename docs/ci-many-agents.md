@@ -629,7 +629,7 @@ bad parent, a changed barrier, a missing artifact, an HTTP error, a stale proof)
 | 7 | `build.yml`: optional per-leg `timeout_minutes`. | `.github/workflows/build.yml` |
 | 8 | Metrics: `ci_metrics.py` and `templates/ci-metrics.yml` (the weekly job of standard 11.5 rule 11). | `scripts/ci_metrics.py`, `templates/`, tests |
 | 9 | Administration and standard: `integration_id` on the required checks and the queue parameters of section 6.2 in `admin/rulesets/`; `docs/standard.md` 0.15 (section 7.3); `docs/using.md`. | `admin/rulesets/*.json`, `docs/` |
-| 10 | Tag `v0.2.0-beta.1` (owner decision, section 9). The README says a change to an input is a major version; these are optional inputs on a pre-1.0 line. | tag (owner) |
+| 10 | Tag `v0.1.20` (owner decision, section 9), the next tag on the monotonic `v0.1.x` line. | tag (owner) |
 
 Steps 2, 3 and 4 add no behaviour until a consumer calls them.
 
@@ -721,8 +721,8 @@ Recorded from the owner's acceptance of the recommendations in the first version
    (owner, 2026-11-07)
 4. **Globbing.** Adopt `file(GLOB ... CONFIGURE_DEPENDS)` for library and test sources
    (section 5.2). (owner, 2026-11-07)
-5. **Version bump.** The version bump is `v0.2.0-beta.1` (pre-1.0; the infra is at v0.1.x).
-   (owner, 2026-11-07)
+5. **Version.** The reuse work is tagged `v0.1.20`, the next tag on the monotonic `v0.1.x` line
+   (owner, 2026-11-07; this replaces an earlier `v0.2.0-beta.1`).
 6. **The `xcode-27` experimental leg.** It runs nightly only. (owner, 2026-11-07)
 7. **`max_entries_to_build` for `iclforge`.** It stays at 8 until reuse is measured (section 8.2).
    (owner, 2026-11-07)

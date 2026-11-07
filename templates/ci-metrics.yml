@@ -5,7 +5,7 @@
 # times, runner wait, wasted share, the age of each refs/ci/green/<group>) in the job summary.
 # It only reads, and it cannot fail a merge.
 #
-# Replace the pin below with the commit of the icl-common-infra tag you use (v0.2.0-beta.1 or
+# Replace the pin below with the commit of the icl-common-infra tag you use (v0.1.20 or
 # later) and keep the version comment, so Dependabot keeps it current. The script comes from the
 # same commit as the pin.
 
@@ -32,7 +32,7 @@ jobs:
       actions: read
     steps:
       - name: Check out icl-common-infra
-        uses: iainchesworthlabs/icl-common-infra/actions/checkout-infra@0000000000000000000000000000000000000000 # v0.2.0-beta.1 (replace with the tagged commit)
+        uses: iainchesworthlabs/icl-common-infra/actions/checkout-infra@6881be87088dca1650cc047e6e3ca7ae0efb4b9c # v0.1.20
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
