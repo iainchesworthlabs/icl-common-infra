@@ -5,6 +5,7 @@
     gcovr --root . --json coverage.json --exclude-throw-branches --exclude-unreachable-branches \\
           --filter 'libs/' --filter 'apps/' --exclude 'tests/' --exclude 'build/'
     coverage_gate.py --report coverage.json --floors tools/coverage-floors.json [--summary FILE]
+                     [--floors-glob 'libs/*/coverage-floor.json' ...] [--root .]
 
 Floors file:
 
@@ -15,6 +16,13 @@ Floors file:
         "libs/legacy_import": {"line": 62, "branch": 41}  # migrated code: a lower floor that ratchets up
       }
     }
+
+Per-component floor files (--floors-glob, repeatable) keep parallel pull requests from colliding
+in one JSON file. Each match is the floor of the component whose directory holds it, relative to
+--root: `libs/core/coverage-floor.json` with {"line": 90, "branch": 85} is the component
+`libs/core`. Keys left out take the default. The root file keeps `default` (and any component not
+given a file of its own); a component named in both places fails the gate, so a floor has one
+home. --write-floors writes a glob component's figures back to its own file.
 
 A component is a path prefix. Every file belongs to the longest matching prefix; a file
 that matches none is reported and fails the gate, so new code cannot hide outside the table.
@@ -64,6 +72,27 @@ def measure(report: dict, components: list[str]):
     return totals, sorted(set(unassigned))
 
 
+def load_floors(path: Path, globs: list[str], root: Path):
+    """The floors table with the per-component files merged in, and where each component came from."""
+    floors = json.loads(path.read_text(encoding="utf-8"))
+    floors.setdefault("components", {})
+    sources: dict[str, Path] = {}
+    problems = []
+    for pattern in globs:
+        for found in sorted(root.glob(pattern)):
+            comp = found.parent.relative_to(root).as_posix()
+            if comp in floors["components"] or comp in sources:
+                problems.append(f"{comp}: has more than one floor ({found.relative_to(root).as_posix()} and another source)")
+                continue
+            try:
+                floors["components"][comp] = json.loads(found.read_text(encoding="utf-8"))
+            except ValueError as e:
+                problems.append(f"{found.relative_to(root).as_posix()}: not JSON ({e})")
+                continue
+            sources[comp] = found
+    return floors, sources, problems
+
+
 def pct(covered: int, total: int) -> float | None:
     return None if total == 0 else 100.0 * covered / total
 
@@ -108,12 +137,16 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--report", required=True)
     ap.add_argument("--floors", required=True)
+    ap.add_argument("--floors-glob", action="append", default=[],
+                    help="glob (relative to --root) of per-component floor files; repeatable")
+    ap.add_argument("--root", default=".")
     ap.add_argument("--summary")
     ap.add_argument("--write-floors", action="store_true")
     args = ap.parse_args(argv)
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
-    floors = json.loads(Path(args.floors).read_text(encoding="utf-8"))
+    floors, sources, load_problems = load_floors(Path(args.floors), args.floors_glob, Path(args.root))
     rows, problems, hints, _ = evaluate(report, floors)
+    problems = load_problems + problems
     table = render(rows)
     print(table)
     for h in hints:
@@ -132,6 +165,10 @@ def main(argv=None) -> int:
             if new["line"] == default["line"] and new["branch"] == default["branch"]:
                 new = {}
             floors["components"][comp] = new
+        for comp, file in sources.items():
+            own = floors["components"].pop(comp)
+            file.write_text(json.dumps({"line": own.get("line", default["line"]),
+                                        "branch": own.get("branch", default["branch"])}) + "\n", encoding="utf-8")
         Path(args.floors).write_text(json.dumps(floors, indent=2) + "\n", encoding="utf-8")
         print("floors updated")
     for p in problems:
