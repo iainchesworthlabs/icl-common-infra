@@ -35,6 +35,14 @@ sets `barrier` (paths that define how results are produced; the workflows, actio
 toolchain pins are always in it) and `max_age_hours` (default 48). Both are inert until the proof steps of
 `docs/ci-many-agents.md` use them.
 
+`actions/record-proof` (in the `CI Status` job) uploads the `ci-proof` artifact of a run, and `actions/find-proof`
+(a `reuse` job after `plan`, with `contents: read`, `actions: read`, `pull-requests: read`) decides which groups an
+earlier run already proved. Set the repository variable `CI_REUSE_MODE` to `shadow` first: the job computes and
+reports in the job summary what it would reuse, and `reused` stays empty so every group still runs. `on` makes
+`reused` real; `off` skips the lookup. The job never fails: on an error the `mode` output is `fallback`. Reuse needs
+the `groups` and `reuse` sections of `plan.json`, and is refused for fork pull requests, for runs of another
+workflow file, for proofs older than `reuse.max_age_hours`, and whenever a barrier path differs.
+
 Hosted runner images carry CMake 3.x, so every job that configures a project installs CMake with
 `actions/setup-cmake` (version from the `cmake` key of `.github/toolchain-versions.json`, else any 4.x) after
 the checkout and after `setup-msvc-env`. The reusable workflows do this themselves.

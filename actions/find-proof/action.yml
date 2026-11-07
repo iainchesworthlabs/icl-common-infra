@@ -1,0 +1,76 @@
+name: Find reusable CI results
+description: >-
+  Looks for earlier runs of the caller's `ci.yml` whose groups passed on a tree that differs from
+  this one only in paths the group does not read, and says which groups need not run
+  (docs/ci-many-agents.md section 3.3). Call it in a `reuse` job after `plan`, after a checkout with
+  `persist-credentials: false`. The job needs `contents: read`, `actions: read` and
+  `pull-requests: read`. It never fails: on any error the mode output is `fallback` and nothing is
+  reused. In `shadow` mode everything is computed and written to the job summary and nothing is
+  skipped; `reused` stays empty and `would_reuse` shows what `on` would have done.
+
+inputs:
+  plan-config:
+    description: Path of the consumer's plan.json, read from the base commit (the groups and reuse sections).
+    default: .github/ci/plan.json
+  mode:
+    description: on, shadow or off. Pass the repository variable CI_REUSE_MODE; empty means shadow.
+    default: shadow
+  stage:
+    description: Informational. The stage is taken from the event.
+    default: ""
+  base-sha:
+    description: >-
+      The commit the change is measured against. Empty uses the pull request's base or the merge
+      group's base. Needed for workflow_dispatch and push.
+    default: ""
+  planner:
+    description: >-
+      Optional command that maps paths on stdin to `groups=` and `promoted=` lines, for a consumer
+      with its own planner. Empty uses scripts/plan_gate.py --groups.
+    default: ""
+  workflow:
+    description: Path of the workflow file whose runs count as evidence.
+    default: .github/workflows/ci.yml
+
+outputs:
+  run:
+    description: JSON list of the groups to run.
+    value: ${{ steps.find.outputs.run }}
+  reused:
+    description: JSON map of group to the run that proves it. Empty ({}) in shadow, off and fallback modes.
+    value: ${{ steps.find.outputs.reused }}
+  would_reuse:
+    description: The same map, filled in every mode but off.
+    value: ${{ steps.find.outputs.would_reuse }}
+  mode:
+    description: on, shadow, off or fallback.
+    value: ${{ steps.find.outputs.mode }}
+  reason:
+    description: Why a candidate was refused, or why the mode is fallback.
+    value: ${{ steps.find.outputs.reason }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.12"
+
+    - name: Find
+      id: find
+      shell: bash
+      env:
+        SCRIPT: ${{ github.action_path }}/../../scripts/reuse_proof.py
+        GH_TOKEN: ${{ github.token }}
+        PLAN_CONFIG: ${{ inputs.plan-config }}
+        MODE: ${{ inputs.mode }}
+        STAGE: ${{ inputs.stage }}
+        BASE_SHA: ${{ inputs.base-sha }}
+        PLANNER: ${{ inputs.planner }}
+        WORKFLOW: ${{ inputs.workflow }}
+      run: |
+        # The script catches its own errors and falls back; this guard covers the interpreter itself.
+        python3 "$SCRIPT" --plan-config "$PLAN_CONFIG" --mode "$MODE" --stage "$STAGE" --base-sha "$BASE_SHA" \
+          --planner "$PLANNER" --workflow "$WORKFLOW" \
+          || { echo "::warning::reuse could not run"; printf 'mode=fallback\nreused={}\nrun=[]\nwould_reuse={}\nreason=reuse_proof.py failed\n' >> "$GITHUB_OUTPUT"; }
