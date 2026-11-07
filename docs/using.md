@@ -20,6 +20,11 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 
 ## Planner and aggregator
 
+Reuse of earlier results (`docs/ci-many-agents.md`) is made of these pieces, used in this order by a consumer:
+`plan_gate.py --groups` and the `groups` and `reuse` sections of `plan.json`; `record-proof` in `CI Status`; a `reuse`
+job with `find-proof` in `CI_REUSE_MODE=shadow`, then `on`; `ci-status` with `reused`; and on `push` `report-red` then
+`mark-green`. Start in shadow mode and move to `on` only when the shadow summaries agree with what ran.
+
 `scripts/plan_gate.py` reads the changed paths and prints `build`, `gui`, `docs_only`,
 `machinery`. The caller runs it in a `plan` job and uses the outputs as job conditions.
 The `ci-status` action takes `toJSON(needs)` and a map of job id to "the plan asked for it"
