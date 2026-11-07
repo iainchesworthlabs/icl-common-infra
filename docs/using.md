@@ -26,6 +26,15 @@ The `ci-status` action takes `toJSON(needs)` and a map of job id to "the plan as
 and fails when a job failed, was cancelled, or was skipped although the plan asked for it, or when a job the plan asked for is missing from `needs` (GitHub leaves out a job that never got a runner).
 Configure the planner with `.github/ci/plan.json` in the consumer.
 
+`plan_gate.py --groups` adds two lines, `groups` and `promoted` (JSON lists), computed from the `groups`
+table of `plan.json`: each group has a `home` stage, `skips` (globs the group does not read, besides
+documentation and `no_build`), `promote` (globs that pull a post-merge group into the queue) and `jobs`
+(the job names that must all succeed for the group to count as proved). The default is to run: a group is
+left out only when every path is documentation, a `no_build` path or one of its `skips`. The `reuse` section
+sets `barrier` (paths that define how results are produced; the workflows, actions, `.github/ci` and the
+toolchain pins are always in it) and `max_age_hours` (default 48). Both are inert until the proof steps of
+`docs/ci-many-agents.md` use them.
+
 Hosted runner images carry CMake 3.x, so every job that configures a project installs CMake with
 `actions/setup-cmake` (version from the `cmake` key of `.github/toolchain-versions.json`, else any 4.x) after
 the checkout and after `setup-msvc-env`. The reusable workflows do this themselves.
