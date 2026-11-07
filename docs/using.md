@@ -43,6 +43,12 @@ reports in the job summary what it would reuse, and `reused` stays empty so ever
 the `groups` and `reuse` sections of `plan.json`, and is refused for fork pull requests, for runs of another
 workflow file, for proofs older than `reuse.max_age_hours`, and whenever a barrier path differs.
 
+After a merge, `actions/report-red` (job needs `issues: write`, `pull-requests: write`, `actions: read`) opens one
+`main-red: <group>` issue per failed group that names the pull requests merged since the group's last green commit
+and comments once on each; the issue closes when the group next passes. `actions/mark-green` (job needs
+`contents: write`; make it `needs` the report job) then moves `refs/ci/green/<group>` forward for every group that
+passed. Neither reverts or blocks anything, and neither fails its job.
+
 Hosted runner images carry CMake 3.x, so every job that configures a project installs CMake with
 `actions/setup-cmake` (version from the `cmake` key of `.github/toolchain-versions.json`, else any 4.x) after
 the checkout and after `setup-msvc-env`. The reusable workflows do this themselves.

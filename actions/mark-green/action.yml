@@ -1,0 +1,38 @@
+name: Mark groups green
+description: >-
+  Moves `refs/ci/green/<group>` forward to the commit this run proved, for each group that
+  succeeded or was reused from a run on an identical tree (docs/ci-many-agents.md section 4.4).
+  The last commit a group was green on is how a later failure gets its suspects. Call it as the
+  last job of a `push` (or nightly) run, with `if: always()` after the groups and the reuse job.
+  The calling job needs `contents: write` (a ref outside refs/heads and refs/tags) and a checkout
+  of the commit with `persist-credentials: false`. Refs only move forward; an API error is a
+  warning and never fails the job.
+
+inputs:
+  needs:
+    description: toJSON(needs) of the calling job (the groups and the reuse job).
+    required: true
+  plan-config:
+    description: Path of the consumer's plan.json; its `groups` table names the groups.
+    default: .github/ci/plan.json
+  reused:
+    description: The reuse job's `reused` output, when there is one.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.12"
+
+    - name: Move the refs
+      shell: bash
+      env:
+        SCRIPT: ${{ github.action_path }}/../../scripts/mark_green.py
+        GH_TOKEN: ${{ github.token }}
+        NEEDS: ${{ inputs.needs }}
+        PLAN_CONFIG: ${{ inputs.plan-config }}
+        REUSED: ${{ inputs.reused }}
+      run: python3 "$SCRIPT" --needs "$NEEDS" --plan-config "$PLAN_CONFIG" --reused "$REUSED" || echo "::warning::could not mark groups green"

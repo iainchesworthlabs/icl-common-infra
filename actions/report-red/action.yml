@@ -1,0 +1,38 @@
+name: Report a red group
+description: >-
+  After a merge, names the suspects of a failed group (docs/ci-many-agents.md section 4.4): the
+  commits between `refs/ci/green/<group>` and the failing commit. Opens or updates one issue per
+  group (`main-red: <group>`), comments once on each suspect pull request, and closes the issue
+  when the group next passes. It reverts nothing and blocks nothing. Call it as a job of a `push`
+  run with `if: always()` after the groups, and make `mark-green` need it: the refs must still
+  be where the last green run left them, or the suspects are empty. The calling job needs `issues: write`,
+  `pull-requests: write` and `actions: read`; it never fails the job.
+
+inputs:
+  needs:
+    description: toJSON(needs) of the calling job (the groups and the reuse job).
+    required: true
+  plan-config:
+    description: Path of the consumer's plan.json; its `groups` table names the groups and their jobs.
+    default: .github/ci/plan.json
+  reused:
+    description: The reuse job's `reused` output, when there is one.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.12"
+
+    - name: Report
+      shell: bash
+      env:
+        SCRIPT: ${{ github.action_path }}/../../scripts/report_red.py
+        GH_TOKEN: ${{ github.token }}
+        NEEDS: ${{ inputs.needs }}
+        PLAN_CONFIG: ${{ inputs.plan-config }}
+        REUSED: ${{ inputs.reused }}
+      run: python3 "$SCRIPT" --needs "$NEEDS" --plan-config "$PLAN_CONFIG" --reused "$REUSED" || echo "::warning::could not report the red groups"
