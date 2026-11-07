@@ -11,6 +11,12 @@ inputs:
   expected:
     description: 'JSON object mapping job id to true or false. Jobs not listed are expected to run.'
     default: "{}"
+  reused:
+    description: >-
+      The `reused` output of the reuse job (find-proof): a JSON map of group to the run that proved it.
+      Optional. A named group may be skipped and is listed in the job summary, with one notice each.
+      Ignored unless the `reuse` job is in `needs` and succeeded.
+    default: ""
 
 runs:
   using: composite
@@ -26,4 +32,5 @@ runs:
         SCRIPT: ${{ github.action_path }}/../../scripts/check_needs.py
         NEEDS: ${{ inputs.needs }}
         EXPECTED: ${{ inputs.expected }}
-      run: python3 "$SCRIPT" --needs "$NEEDS" --expected "$EXPECTED"
+        REUSED: ${{ inputs.reused }}
+      run: python3 "$SCRIPT" --needs "$NEEDS" --expected "$EXPECTED" --reused "$REUSED"
