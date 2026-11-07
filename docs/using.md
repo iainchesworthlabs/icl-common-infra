@@ -54,6 +54,11 @@ floor file per component (`{"line": 90, "branch": 85}`, keys left out take the d
 `CMakeLists.txt`, so a new library adds a file instead of a line to `tools/coverage-floors.json`, which keeps `default`.
 A component named in both places fails the gate. `--write-floors` writes a component's ratchet to its own file.
 
+`templates/ci-metrics.yml` is a weekly job that runs `scripts/ci_metrics.py` and writes the numbers of
+`docs/ci-many-agents.md` section 8.2 to its job summary (`actions: read`, no other write). Copy it to
+`.github/workflows/ci-metrics.yml` and replace the placeholder pin with the commit of the tag you use. Reuse rate and
+false reuse are read from the `Reuse` summaries of the runs; the API does not expose them as data.
+
 Hosted runner images carry CMake 3.x, so every job that configures a project installs CMake with
 `actions/setup-cmake` (version from the `cmake` key of `.github/toolchain-versions.json`, else any 4.x) after
 the checkout and after `setup-msvc-env`. The reusable workflows do this themselves.
