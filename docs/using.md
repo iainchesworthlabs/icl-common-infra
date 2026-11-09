@@ -264,6 +264,28 @@ branch, `workflow_run` after the CI workflow finished saving its caches, and `wo
 purge. The rules and the key shapes are in the header of `scripts/prune_actions_cache.sh`, which can also be run by hand
 (`gh` with `actions: write`, and `jq`).
 
+### Who writes the caches
+
+`setup-vcpkg` and `setup-ccache` take a `cache-write` input, `auto` by default. With `auto`, only a push, scheduled or
+manual run of the default branch saves the vcpkg binaries, downloads and tool, and the ccache. A pull request,
+merge-queue entry or tag run restores the default branch's entries and saves nothing. An entry is readable from its own
+ref and the default branch, so a merge-queue ref's entry can never be read again, and a pull request's helps only that
+pull request. In error-journaling, those two kinds were 7 of the 10.7 GB in use on 9 November 2026. `build.yml` saves
+the ccache only when `CCACHE_SAVE` is `true`. A caller that saves the ccache itself checks the same variable.
+`save-vcpkg-cache` reads `VCPKG_CACHE_WRITE`. Pass `cache-write: "true"` for a job that must write on another ref.
+
+### The vcpkg tool and the bootstrap
+
+`bootstrap-vcpkg` downloads the vcpkg tool binary from GitHub's release CDN. Its own curl retries are one to four
+seconds apart, and that download was the step that failed with HTTP 504 across the merge queue on 9 November 2026.
+`setup-vcpkg` now caches the binary under `vcpkg-tool-<OS>-<ARCH>-<release tag>-<hash of vcpkg-tool-metadata.txt>`, a
+few megabytes per platform. It bootstraps only when the cache has no copy or the cached copy does not run. The bootstrap,
+the clone of the fork and its fetch run through `scripts/retry.sh`: 5 attempts, waiting 20, 40, 80 and 160 seconds.
+
+Port sources and the tools vcpkg fetches itself (CMake, Ninja, 7-Zip) land in `VCPKG_DOWNLOADS`, which is the
+`vcpkg-downloads-…` cache. vcpkg looks there by file name and SHA-512 before it goes upstream, so that directory is the
+asset cache and `X_VCPKG_ASSET_SOURCES` is not set. On a binary-cache hit vcpkg downloads no sources at all.
+
 ## Tests in phases
 
 `actions/run-ctest` runs CTest in phases, re-runs the tests that failed once, by name, and reports a test that failed and

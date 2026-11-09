@@ -103,6 +103,21 @@ class Plan(unittest.TestCase):
         rows = self.dropped(done.stdout)
         self.assertEqual([(r[0], r[2]) for r in rows], [("superseded", f"vcpkg-binary-cache-x64-linux-{HEX16}")])
 
+    def test_older_vcpkg_tool_release_is_superseded_per_os(self):
+        done = self.run_plan(
+            [
+                cache(1, f"vcpkg-tool-Linux-X64-2026-06-01-{HEX16}", "refs/heads/develop", "2026-10-01T00:00:00Z"),
+                cache(2, "vcpkg-tool-Linux-X64-2026-09-26-fedcba9876543210", "refs/heads/develop", "2026-10-02T00:00:00Z"),
+                cache(3, f"vcpkg-tool-macOS-ARM64-2026-06-01-{HEX16}", "refs/heads/develop", "2026-10-01T00:00:00Z"),
+            ],
+            ["refs/heads/develop"],
+            "--grace-minutes",
+            "0",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = self.dropped(done.stdout)
+        self.assertEqual([(r[0], r[2]) for r in rows], [("superseded", f"vcpkg-tool-Linux-X64-2026-06-01-{HEX16}")])
+
     def test_purge_prefix_goes_on_every_ref(self):
         done = self.run_plan(
             [
