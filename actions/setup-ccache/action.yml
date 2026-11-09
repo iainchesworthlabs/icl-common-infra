@@ -82,7 +82,10 @@ runs:
           auto)
             write=false
             case "$EVENT" in
-              push | schedule | workflow_dispatch)
+              # A scheduled run is always on the default branch, and its payload
+              # may not name the repository's default branch.
+              schedule) write=true ;;
+              push | workflow_dispatch)
                 if [ -n "$DEFAULT_BRANCH" ] && [ "$REF" = "refs/heads/$DEFAULT_BRANCH" ]; then write=true; fi ;;
             esac ;;
           *) echo "::error::cache-write must be auto, true or false, not '$CACHE_WRITE'"; exit 1 ;;
