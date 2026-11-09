@@ -2,7 +2,8 @@ name: Save vcpkg caches
 description: >-
   Saves the vcpkg binary and download caches that ../setup-vcpkg restored, if
   the job added to them and no identical entry is already readable from this
-  ref, under a key ending in a hash of the directory's contents. Run it as the
+  ref, under a key ending in a hash of the directory's contents, and only when
+  setup-vcpkg's cache-write policy lets this job write (VCPKG_CACHE_WRITE). Run it as the
   last step of a job, `if: always()` and `continue-on-error: true`, so a failing
   or cancelled job keeps the packages it had already built and a cache that
   cannot be saved is never what fails the job. It takes no inputs: setup-vcpkg
@@ -47,6 +48,14 @@ runs:
           } >> "$GITHUB_OUTPUT"
           echo "vcpkg cache $name: $files file(s); restored ${restored:-nothing}, now ${listing:-n/a}; save=$changed"
         }
+        if [ "${VCPKG_CACHE_WRITE:-true}" = false ]; then
+          # setup-vcpkg's cache-write policy: only the default branch writes.
+          for name in binaries downloads; do
+            { echo "${name}_changed=false"; echo "${name}_key="; echo "${name}_files=0"; } >> "$GITHUB_OUTPUT"
+          done
+          echo "vcpkg caches: this run only restores (VCPKG_CACHE_WRITE=false); nothing saved"
+          exit 0
+        fi
         decide binaries "$HOME/.cache/vcpkg/archives" "${VCPKG_CACHE_BINARIES_KEY:-}" "${VCPKG_CACHE_BINARIES_LISTING:-}"
         decide downloads "$HOME/.cache/vcpkg/downloads" "${VCPKG_CACHE_DOWNLOADS_KEY:-}" "${VCPKG_CACHE_DOWNLOADS_LISTING:-}"
 

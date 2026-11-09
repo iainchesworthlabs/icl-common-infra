@@ -35,6 +35,7 @@
 #        vcpkg[-downloads]-<OS>-<ARCH>-<40 hex>-<64 hex>[-<lineage>][-<16 hex>]
 #                                                     ICL Forge, aqualink-automate
 #        vcpkg-downloads-<40 hex>-<64 hex>            aqualink-automate
+#        vcpkg-tool-<OS>-<ARCH>-<release tag>-<16 hex>  setup-vcpkg (the bootstrapped tool)
 #        ccache-<job>-<OS>-<ARCH>-<40 hex>            ICL Forge
 #        install-qt-action-<os>-...-<desktop|android|ios>-...
 #        cache-trivy-<date>                           aqualink-automate
@@ -131,6 +132,8 @@ def family:
       then "vcpkg:" + ($k | capture("^vcpkg-binary-cache-(?<p>.+?)-[0-9a-f]{64}").p)
     elif ($k | test("^vcpkg-binary-cache-.+-[0-9a-f]{16}$"))
       then "vcpkg:" + ($k | capture("^vcpkg-binary-cache-(?<t>.+)-[0-9a-f]{16}$").t)
+    elif ($k | test("^vcpkg-tool-[A-Za-z0-9]+-[A-Za-z0-9]+-"))
+      then ($k | capture("^vcpkg-tool-(?<os>[A-Za-z0-9]+)-(?<arch>[A-Za-z0-9]+)-") | "vcpkg-tool:" + .os + "-" + .arch)
     elif ($k | test("^vcpkg(-downloads)?-[A-Za-z0-9]+-[A-Za-z0-9]+-[0-9a-f]{40}-[0-9a-f]{64}"))
       then ($k | capture("^(?<kind>vcpkg(?:-downloads)?)-(?<os>[A-Za-z0-9]+)-(?<arch>[A-Za-z0-9]+)-[0-9a-f]{40}-[0-9a-f]{64}(?:-(?<suffix>.+?))?(?:-[0-9a-f]{16})?$")
             | .kind + ":" + .os + "-" + .arch + (if .suffix then "-" + .suffix else "" end))

@@ -1,9 +1,11 @@
 name: Setup vcpkg
 description: >-
   Clone the organisation's vcpkg fork, check out the commit that vcpkg.json names
-  as its builtin-baseline, bootstrap it, export VCPKG_ROOT, and restore the
+  as its builtin-baseline, bootstrap it (from the cached tool binary when there
+  is one, with retries and backoff when not), export VCPKG_ROOT, and restore the
   binary and download caches. Pair it with save-vcpkg-cache as the last step of
-  the job.
+  the job. Only the default branch writes the caches unless cache-write says
+  otherwise.
 
 inputs:
   vcpkg-commit:
@@ -23,14 +25,56 @@ inputs:
       takes the newest entry of its own lineage, so two jobs with different
       sets must not share one.
     default: ""
+  cache-write:
+    description: >-
+      Whether this job may save the vcpkg caches: "auto", "true" or "false".
+      "auto" saves only on a push, scheduled or manual run of the default
+      branch. Every other run (pull requests, merge-queue entries, tags) only
+      restores: an entry is readable from its own ref and the default branch,
+      so one saved on a pull request or a merge-queue ref spends quota that
+      almost nothing else can use, while every ref can read the default
+      branch's. setup-vcpkg exports the answer as VCPKG_CACHE_WRITE for
+      ../save-vcpkg-cache.
+    default: auto
 
 runs:
   using: composite
   steps:
+    # Who writes the caches (the budget in docs/using.md, "Actions cache").
+    - name: Decide whether this job writes the vcpkg caches
+      id: policy
+      shell: bash
+      env:
+        CACHE_WRITE: ${{ inputs.cache-write }}
+        EVENT: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: | # zizmor: ignore[github-env] the value is the literal true or false
+        set -euo pipefail
+        case "$CACHE_WRITE" in
+          true | false) write="$CACHE_WRITE" ;;
+          auto)
+            write=false
+            case "$EVENT" in
+              # A scheduled run is always on the default branch, and its payload
+              # may not name the repository's default branch.
+              schedule) write=true ;;
+              push | workflow_dispatch)
+                if [ -n "$DEFAULT_BRANCH" ] && [ "$REF" = "refs/heads/$DEFAULT_BRANCH" ]; then write=true; fi ;;
+            esac ;;
+          *) echo "::error::cache-write must be auto, true or false, not '$CACHE_WRITE'"; exit 1 ;;
+        esac
+        echo "write=$write" >> "$GITHUB_OUTPUT"
+        echo "VCPKG_CACHE_WRITE=$write" >> "$GITHUB_ENV"
+        echo "vcpkg caches: this job $([ "$write" = true ] && echo writes || echo only restores)"
+
     # A full clone: manifest mode with no builtin-baseline resolves the baseline
     # from the checkout's history, which a --depth 1 clone does not have. Then
     # reset to the pin so a rebuild months from now installs the same Catch2.
-    - name: Clone and bootstrap vcpkg
+    # Clone and fetch go through ../../scripts/retry.sh, so a 5xx from GitHub's
+    # git service waits and tries again instead of failing the job.
+    - name: Clone vcpkg
+      id: clone
       shell: bash
       # inputs.vcpkg-commit read through env: rather than interpolated
       # straight into the script text - every caller today passes a literal
@@ -53,6 +97,7 @@ runs:
       env:
         VCPKG_COMMIT: ${{ inputs.vcpkg-commit }}
         FORK_URL: ${{ inputs.fork-url }}
+        RETRY: ${{ github.action_path }}/../../scripts/retry.sh
       run: | # zizmor: ignore[github-env] VCPKG_ROOT is RUNNER_TEMP-derived, not attacker-influenced - see above
         set -euo pipefail
         if [ -z "$VCPKG_COMMIT" ]; then
@@ -61,17 +106,78 @@ runs:
         fi
         VCPKG_DIR="${RUNNER_TEMP}/vcpkg"
         if [ ! -d "$VCPKG_DIR/.git" ]; then
-          git clone "$FORK_URL" "$VCPKG_DIR"
+          bash "$RETRY" --cleanup "$VCPKG_DIR" -- git clone --quiet "$FORK_URL" "$VCPKG_DIR"
         fi
-        git -C "$VCPKG_DIR" fetch --tags origin
-        git -C "$VCPKG_DIR" checkout --force "$VCPKG_COMMIT"
+        bash "$RETRY" -- git -C "$VCPKG_DIR" fetch --quiet --tags origin
+        git -C "$VCPKG_DIR" checkout --quiet --force "$VCPKG_COMMIT"
         if [ "$RUNNER_OS" = "Windows" ]; then
-          "$VCPKG_DIR/bootstrap-vcpkg.bat" -disableMetrics
           echo "VCPKG_ROOT=$(cygpath -w "$VCPKG_DIR")" >> "$GITHUB_ENV"
+          tool=vcpkg.exe
         else
-          "$VCPKG_DIR/bootstrap-vcpkg.sh" -disableMetrics
           echo "VCPKG_ROOT=$VCPKG_DIR" >> "$GITHUB_ENV"
+          tool=vcpkg
         fi
+        # The tool binary is named by vcpkg-tool-metadata.txt (its release tag
+        # and the SHA-512 of each platform's binary), so a hash of that file
+        # names exactly one binary per OS and architecture.
+        meta="$VCPKG_DIR/scripts/vcpkg-tool-metadata.txt"
+        tag="$(sed -n 's/^VCPKG_TOOL_RELEASE_TAG=//p' "$meta" | tr -d '\r')"
+        hash="$(sha256sum "$meta" | cut -c1-16)"
+        {
+          echo "dir=$VCPKG_DIR"
+          echo "tool=$tool"
+          echo "tool_key=vcpkg-tool-$RUNNER_OS-$RUNNER_ARCH-$tag-$hash"
+        } >> "$GITHUB_OUTPUT"
+
+    # The bootstrap downloads the vcpkg-tool binary from GitHub's release CDN
+    # with three retries one to four seconds apart, and that download was the
+    # step that failed with HTTP 504 on 9 November 2026. The binary is a few
+    # megabytes and changes only when the vcpkg pin moves to a new tool
+    # release, so it is cached under an exact key and the bootstrap runs only
+    # when the cache has no copy.
+    - name: Restore the vcpkg tool
+      id: tool
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/vcpkg/tool
+        key: ${{ steps.clone.outputs.tool_key }}
+
+    - name: Bootstrap vcpkg
+      shell: bash
+      env:
+        VCPKG_DIR: ${{ steps.clone.outputs.dir }}
+        TOOL: ${{ steps.clone.outputs.tool }}
+        RETRY: ${{ github.action_path }}/../../scripts/retry.sh
+      run: |
+        set -euo pipefail
+        cached="$HOME/.cache/vcpkg/tool/$TOOL"
+        if [ -f "$cached" ]; then
+          cp "$cached" "$VCPKG_DIR/$TOOL"
+          chmod +x "$VCPKG_DIR/$TOOL"
+          if "$VCPKG_DIR/$TOOL" version --disable-metrics >/dev/null 2>&1; then
+            touch "$VCPKG_DIR/vcpkg.disable-metrics"
+            echo "vcpkg tool restored from the Actions cache; no bootstrap download"
+            "$VCPKG_DIR/$TOOL" version --disable-metrics | head -1
+            exit 0
+          fi
+          echo "::warning::the cached vcpkg tool does not run; bootstrapping instead"
+          rm -f "$VCPKG_DIR/$TOOL" "$cached"
+        fi
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          bash "$RETRY" -- "$VCPKG_DIR/bootstrap-vcpkg.bat" -disableMetrics
+        else
+          bash "$RETRY" -- "$VCPKG_DIR/bootstrap-vcpkg.sh" -disableMetrics
+        fi
+        mkdir -p "${cached%/*}"
+        cp "$VCPKG_DIR/$TOOL" "$cached"
+
+    - name: Save the vcpkg tool
+      if: steps.policy.outputs.write == 'true' && steps.tool.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/vcpkg/tool
+        key: ${{ steps.clone.outputs.tool_key }}
 
     # vcpkg rejects an MSYS-style path (/c/...) for these, so hand it a native
     # Windows path. The cache action below still needs the bash-style path,

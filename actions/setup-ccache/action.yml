@@ -3,8 +3,9 @@ description: >-
   Install ccache, restore its cache, and point CMake at it through
   CMAKE_C_COMPILER_LAUNCHER and CMAKE_CXX_COMPILER_LAUNCHER (CMake reads these
   environment variables as the initial value of the cache variables). Save the cache
-  at the end of the job with actions/cache/save, `if: always()`, using the key this
-  action exports as CCACHE_SAVE_KEY. MSVC builds with /Z7 (embedded debug info) or
+  at the end of the job with actions/cache/save, `if: always() && env.CCACHE_SAVE == 'true'`,
+  using the key this action exports as CCACHE_SAVE_KEY; CCACHE_SAVE says whether this job
+  may write (see the cache-write input). MSVC builds with /Z7 (embedded debug info) or
   the compiler does not cache; presets for MSVC must set CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded.
 
 inputs:
@@ -14,6 +15,14 @@ inputs:
   max-size:
     description: Upper bound for the cache directory.
     default: 600M
+  cache-write:
+    description: >-
+      Whether this job may save its ccache: "auto", "true" or "false", exported as
+      CCACHE_SAVE. "auto" saves only on a push, scheduled or manual run of the default
+      branch, the same rule as setup-vcpkg. A pull request or merge-queue run restores the
+      default branch's entry and saves nothing: an entry saved on its ref is readable from
+      that ref alone, and those entries were most of the quota (docs/using.md, "Actions cache").
+    default: auto
 
 runs:
   using: composite
@@ -62,5 +71,25 @@ runs:
       shell: bash
       env:
         PREFIX: ${{ steps.cfg.outputs.prefix }}
-      run: | # zizmor: ignore[github-env] runner OS, arch, lineage and commit SHA only
+        CACHE_WRITE: ${{ inputs.cache-write }}
+        EVENT: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: | # zizmor: ignore[github-env] runner OS, arch, lineage, commit SHA and a literal true/false only
+        set -euo pipefail
+        case "$CACHE_WRITE" in
+          true | false) write="$CACHE_WRITE" ;;
+          auto)
+            write=false
+            case "$EVENT" in
+              # A scheduled run is always on the default branch, and its payload
+              # may not name the repository's default branch.
+              schedule) write=true ;;
+              push | workflow_dispatch)
+                if [ -n "$DEFAULT_BRANCH" ] && [ "$REF" = "refs/heads/$DEFAULT_BRANCH" ]; then write=true; fi ;;
+            esac ;;
+          *) echo "::error::cache-write must be auto, true or false, not '$CACHE_WRITE'"; exit 1 ;;
+        esac
         echo "CCACHE_SAVE_KEY=${PREFIX}${GITHUB_SHA}" >> "$GITHUB_ENV"
+        echo "CCACHE_SAVE=$write" >> "$GITHUB_ENV"
+        echo "ccache: this job $([ "$write" = true ] && echo writes || echo only restores)"
