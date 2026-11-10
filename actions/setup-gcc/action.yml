@@ -29,17 +29,42 @@ runs:
           VERSION="$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('gcc', ''))" "$file")"
         fi
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "debdir=$HOME/.cache/icl-apt/gcc-$VERSION" >> "$GITHUB_OUTPUT"
+
+    # The installed packages are cached, so a job installs without apt-get update or a download from the mirrors
+    # (apt.llvm.org and archive.ubuntu.com failed whole runs on 10 November 2026). Only a push to the default branch,
+    # a manual run or a schedule saves it; the key names the runner image, because a new image changes the dependencies.
+    - name: Restore the package cache
+      id: debs
+      if: runner.os == 'Linux' && steps.pin.outputs.version != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.debdir }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.pin.outputs.version }}-${{ env.ImageVersion }}
 
     - name: Install GCC
+      id: install
       if: runner.os == 'Linux' && steps.pin.outputs.version != ''
       shell: bash
       env:
         GCC_VERSION: ${{ steps.pin.outputs.version }}
+        ICL_DEB_CACHE: ${{ steps.pin.outputs.debdir }}
         EXPORT_COMPILER: ${{ inputs.export-compiler }}
       run: | # zizmor: ignore[github-env] the value is the compiler major version pinned in the repository's own toolchain-versions.json
         set -euo pipefail
-        timeout 900 sudo --preserve-env=GCC_VERSION bash "$GITHUB_ACTION_PATH/install-gcc.sh"
+        timeout 900 sudo --preserve-env=GCC_VERSION,ICL_DEB_CACHE bash "$GITHUB_ACTION_PATH/install-gcc.sh"
         if [ "$EXPORT_COMPILER" = "true" ]; then
           echo "CC=gcc-$GCC_VERSION" >> "$GITHUB_ENV"
           echo "CXX=g++-$GCC_VERSION" >> "$GITHUB_ENV"
         fi
+
+    - name: Save the package cache
+      if: >-
+        runner.os == 'Linux' && steps.pin.outputs.version != '' && steps.debs.outputs.cache-hit != 'true'
+        && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        && github.ref_name == github.event.repository.default_branch && hashFiles(format('{0}/.new', steps.pin.outputs.debdir)) != ''
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.debdir }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.pin.outputs.version }}-${{ env.ImageVersion }}

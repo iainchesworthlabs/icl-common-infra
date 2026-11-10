@@ -87,6 +87,8 @@ A `build.yml` leg sets `"compiler": "gcc"` or `"compiler": "clang"` (which also 
 the leg's runner is `ubuntu-26.04`. A leg with `"experimental": true` reports but cannot fail the run, for a
 preview toolchain such as the `xcode-27` runner. Apple Clang comes with the runner image; choose the label.
 
+**Package cache.** `setup-gcc` and `setup-llvm` keep the `.deb` files of a clean install in an Actions cache (`apt-debs-<os>-<arch>-<tool>-<version>-<image version>`) and install from it with no `apt-get update` and no mirror, so an outage of apt.llvm.org or an Ubuntu mirror stops failing runs once the cache exists. Only a push to the default branch, a manual run or a schedule saves it. When the cache is empty or does not install, the scripts use the network: four attempts with waits of 20, 60 and 120 seconds plus jitter, always on the runner image's own mirror. `setup-ccache` no longer fails when another apt source is down.
+
 ## Qt
 
 `actions/setup-qt` installs the Qt kit named by the `qt` key of `.github/toolchain-versions.json` (and, on Windows,
