@@ -30,6 +30,8 @@ runs:
         fi
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
         echo "debdir=$HOME/.cache/icl-apt/gcc-$VERSION" >> "$GITHUB_OUTPUT"
+        # Made here, as the runner user: if the install script (root) created ~/.cache first, vcpkg could not make its own directory in it.
+        if [ -n "$VERSION" ]; then mkdir -p "$HOME/.cache/icl-apt/gcc-$VERSION"; fi
 
     # The installed packages are cached, so a job installs without apt-get update or a download from the mirrors
     # (apt.llvm.org and archive.ubuntu.com failed whole runs on 10 November 2026). Only a push to the default branch,

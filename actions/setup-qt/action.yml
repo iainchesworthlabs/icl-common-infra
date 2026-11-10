@@ -63,6 +63,8 @@ runs:
       run: |
         set -euo pipefail
         echo "debdir=$HOME/.cache/icl-apt/qt-deps" >> "$GITHUB_OUTPUT"
+        # Made here, as the runner user: if the install script (root) created ~/.cache first, vcpkg could not make its own directory in it.
+        mkdir -p "$HOME/.cache/icl-apt/qt-deps"
 
     - name: Restore the package cache
       id: debs
