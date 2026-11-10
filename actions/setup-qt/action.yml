@@ -52,6 +52,35 @@ runs:
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
         echo "aqtsource=$AQTSOURCE" >> "$GITHUB_OUTPUT"
 
+    # install-qt-action installs its Linux packages with an unguarded `sudo apt-get update && install` that failed whole runs
+    # (exit code 100) when the Ubuntu mirror was down. The same list is installed here from a cached package set, with a
+    # retry, and the action is told to skip its own install. Only a push to the default branch, a manual run or a schedule
+    # saves the cache; the key names the runner image.
+    - name: Prepare the Qt runtime packages
+      id: deps
+      if: runner.os == 'Linux' && steps.pins.outputs.version != '' && inputs.host == ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "debdir=$HOME/.cache/icl-apt/qt-deps" >> "$GITHUB_OUTPUT"
+        # Made here, as the runner user: if the install script (root) created ~/.cache first, vcpkg could not make its own directory in it.
+        mkdir -p "$HOME/.cache/icl-apt/qt-deps"
+
+    - name: Restore the package cache
+      id: debs
+      if: steps.deps.outcome == 'success'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.deps.outputs.debdir }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-qt-deps-${{ env.ImageVersion }}
+
+    - name: Install the Qt runtime packages
+      if: steps.deps.outcome == 'success'
+      shell: bash
+      env:
+        ICL_DEB_CACHE: ${{ steps.deps.outputs.debdir }}
+      run: sudo --preserve-env=ICL_DEB_CACHE bash "$GITHUB_ACTION_PATH/install-deps.sh"
+
     - name: Install Qt
       if: steps.pins.outputs.version != ''
       uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
@@ -63,3 +92,16 @@ runs:
         arch: ${{ inputs.arch }}
         host: ${{ inputs.host }}
         cache: true
+        install-deps: ${{ steps.deps.outcome == 'success' && 'false' || 'true' }}
+
+    - name: Save the package cache
+      if: >-
+        steps.deps.outcome == 'success' && steps.debs.outputs.cache-hit != 'true'
+        && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        && github.ref_name == github.event.repository.default_branch
+        && hashFiles(format('{0}/.new', steps.deps.outputs.debdir)) != ''
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.deps.outputs.debdir }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-qt-deps-${{ env.ImageVersion }}
