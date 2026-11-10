@@ -26,17 +26,42 @@ runs:
           VERSION="$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('llvm', ''))" "$file")"
         fi
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "debdir=$HOME/.cache/icl-apt/llvm-$VERSION" >> "$GITHUB_OUTPUT"
+
+    # The installed packages are cached, so a job installs without apt-get update or a download from the mirrors
+    # (apt.llvm.org and archive.ubuntu.com failed whole runs on 10 November 2026). Only a push to the default branch,
+    # a manual run or a schedule saves it; the key names the runner image, because a new image changes the dependencies.
+    - name: Restore the package cache
+      id: debs
+      if: runner.os == 'Linux' && steps.pin.outputs.version != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.debdir }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.pin.outputs.version }}-${{ env.ImageVersion }}
 
     - name: Install LLVM
+      id: install
       if: runner.os == 'Linux' && steps.pin.outputs.version != ''
       shell: bash
       env:
         LLVM_VERSION: ${{ steps.pin.outputs.version }}
+        ICL_DEB_CACHE: ${{ steps.pin.outputs.debdir }}
       run: | # zizmor: ignore[github-env] the value is the compiler major version pinned in the repository's own toolchain-versions.json
         set -euo pipefail
-        timeout 900 sudo --preserve-env=LLVM_VERSION bash "$GITHUB_ACTION_PATH/install-llvm.sh"
+        timeout 900 sudo --preserve-env=LLVM_VERSION,ICL_DEB_CACHE bash "$GITHUB_ACTION_PATH/install-llvm.sh"
         echo "CC=clang-$LLVM_VERSION" >> "$GITHUB_ENV"
         echo "CXX=clang++-$LLVM_VERSION" >> "$GITHUB_ENV"
         # ASan and UBSan call llvm-symbolizer; the versioned name is not on PATH by default.
         echo "ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-$LLVM_VERSION" >> "$GITHUB_ENV"
         echo "TSAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-$LLVM_VERSION" >> "$GITHUB_ENV"
+
+    - name: Save the package cache
+      if: >-
+        runner.os == 'Linux' && steps.pin.outputs.version != '' && steps.debs.outputs.cache-hit != 'true'
+        && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+        && github.ref_name == github.event.repository.default_branch && hashFiles(format('{0}/.new', steps.pin.outputs.debdir)) != ''
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.pin.outputs.debdir }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.pin.outputs.version }}-${{ env.ImageVersion }}

@@ -33,7 +33,11 @@ runs:
         set -euo pipefail
         if command -v ccache >/dev/null 2>&1; then exit 0; fi
         case "$RUNNER_OS" in
-          Linux)   sudo apt-get update -qq && sudo apt-get install -y -qq ccache ;;
+          Linux)
+            # A source another step added (apt.llvm.org) can be down; its failure must not stop ccache, which comes
+            # from the Ubuntu archive. apt-get update still refreshes the other sources and exits 100.
+            sudo apt-get update -qq || echo "::warning title=apt-get::apt-get update failed for a source; installing ccache from the lists apt has"
+            sudo apt-get install -y -qq ccache ;;
           macOS)   brew install ccache ;;
           Windows) choco install ccache -y --no-progress ;;
         esac

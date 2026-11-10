@@ -23,24 +23,42 @@ Acquire::https::Timeout "30";
 Acquire::Retries "3";
 APTCONF
 
-# apt-get update, then apt-get install of any packages named, in up to three
-# attempts 30 s apart. Each attempt re-runs the update, so a retry reads a fresh
+# apt-get update, then apt-get install of any packages named, in up to four
+# attempts with a growing wait. Each attempt re-runs the update, so a retry reads a fresh
 # index and may reach another mirror node: Ubuntu's mirrors fail a single attempt
 # outright now and then (a pool 404 for a version the index names, or an index
 # caught mid-sync), and apt's own Acquire::Retries treats a 404 as final. The
 # workflows' own apt steps run the same loop inline. A function in each script
 # rather than one shared file, because the fleet's Packer build uploads and runs
 # each of these scripts on its own.
-# The runner image reads the Ubuntu archive through a mirror list that picks the Azure mirror. If a
-# download from it stalled, later attempts read archive.ubuntu.com instead.
-use_main_archive() {
-    echo "::notice title=apt-get::switching to archive.ubuntu.com for the next attempt"
-    local file
-    for file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
-        [ -f "$file" ] || continue
-        sed -i -e 's#mirror+file:/etc/apt/apt-mirrors.txt#http://archive.ubuntu.com/ubuntu/#' \
-            -e 's#http://azure.archive.ubuntu.com/ubuntu/\?#http://archive.ubuntu.com/ubuntu/#' "$file"
-    done
+# Where the packages of a clean install are kept between runs (actions/setup-gcc and setup-llvm restore and save it
+# as an Actions cache). Empty when the script runs outside those actions.
+DEB_DIR="${ICL_DEB_CACHE:-}"
+# apt stamps a downloaded file with the server's date, so "new" is decided by name, not by time.
+DEB_BEFORE="$(mktemp)"
+find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -printf '%f\n' | sort > "$DEB_BEFORE"
+
+# Install from the cached .deb files, with no apt-get update and no download of the toolchain. Any failure
+# (no cache, a stale dependency) returns 1 and the caller takes the network path.
+install_from_cache() {
+    [ -n "$DEB_DIR" ] && compgen -G "$DEB_DIR/*.deb" >/dev/null || return 1
+    echo "==> Installing from the package cache in $DEB_DIR"
+    timeout 300 apt-get install -y --no-install-recommends "$DEB_DIR"/*.deb || {
+        echo "::warning title=apt-get::the cached packages did not install; using the network"
+        return 1
+    }
+}
+
+# Keep the packages this script downloaded, for the next run. The action saves the directory only when .new exists.
+save_to_cache() {
+    [ -n "$DEB_DIR" ] || return 0
+    mkdir -p "$DEB_DIR"
+    local deb
+    while IFS= read -r deb; do
+        cp -f "/var/cache/apt/archives/$deb" "$DEB_DIR"/
+    done < <(find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -printf '%f\n' | sort | comm -13 "$DEB_BEFORE" -)
+    if compgen -G "$DEB_DIR/*.deb" >/dev/null; then touch "$DEB_DIR/.new"; fi
+    chmod -R a+rX "$DEB_DIR"
 }
 
 apt_retry() {
@@ -48,14 +66,17 @@ apt_retry() {
     # The download is a step of its own with a time limit: a transfer that stalls on the mirror is
     # killed and tried again, which is safe before anything is unpacked. apt's own timeouts do not fire
     # for it. The install then reads only the local cache. A normal download of GCC takes under a minute.
-    until { [ "$attempt" -lt 2 ] || use_main_archive; } && timeout 180 apt-get update && { [ "$#" -eq 0 ] || {
+    until timeout 180 apt-get update && { [ "$#" -eq 0 ] || {
         timeout 150 apt-get install -y --download-only --no-install-recommends "$@" &&
             apt-get install -y --no-install-recommends "$@"; }; }
     do
-        echo "::warning title=apt-get::attempt $attempt of 3 failed"
-        [ "$attempt" -lt 3 ] || return 1
+        echo "::warning title=apt-get::attempt $attempt of 4 failed"
+        [ "$attempt" -lt 4 ] || return 1
+        # 20, 60 and 120 s, plus up to 15 s of jitter so that the shards of one run do not retry together. The
+        # runner image's own mirror (GitHub's, through apt-mirrors.txt) stays in use: switching to
+        # archive.ubuntu.com made things worse on 10 November 2026 (Connection failed on all three attempts).
+        sleep $(( (attempt == 1 ? 20 : attempt == 2 ? 60 : 120) + RANDOM % 15 ))
         attempt=$((attempt + 1))
-        sleep 30
     done
 }
 
@@ -101,6 +122,7 @@ PACKAGES=(
 # apt.llvm.org, which has had sustained (~30 min) pool outages that used to block
 # the whole template build. Ensure 'universe' is enabled — it already is on a
 # stock Ubuntu Server install; this is an idempotent safety net for trimmed bases.
+if ! install_from_cache; then
 add-apt-repository -y universe >/dev/null 2>&1 || true
 apt_retry
 
@@ -163,6 +185,8 @@ else
 fi
 
 apt_retry "${PACKAGES[@]}"
+save_to_cache
+fi
 
 # Set up alternatives, then --set each one explicitly. --install alone is not
 # enough on a machine that already has an older pinned version selected: with
