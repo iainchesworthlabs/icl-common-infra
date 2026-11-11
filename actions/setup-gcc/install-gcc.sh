@@ -86,8 +86,8 @@ fetch_one() {
             ;;
         *) urls+=("$url") ;;
     esac
-    local round candidate
-    for round in 1 2 3; do
+    local candidate
+    for _ in 1 2 3; do
         for candidate in "${urls[@]}"; do
             if curl -fsSL --connect-timeout 10 --max-time 300 --speed-limit 200000 --speed-time 10 \
                     -C - -o "$part" "$candidate" 2>/dev/null; then
