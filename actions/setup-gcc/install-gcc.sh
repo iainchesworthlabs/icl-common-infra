@@ -72,12 +72,19 @@ fetch_one() {
     local dir=/var/cache/apt/archives part
     part="$dir/partial/$name"
     if [ -f "$dir/$name" ] && [ "$($sum "$dir/$name" | cut -d' ' -f1)" = "$hash" ]; then return 0; fi
-    local -a urls=("$url")
+    # The runner image names its mirror through a list (mirror+file:/etc/apt/apt-mirrors.txt/pool/...), which curl
+    # cannot read: use the list's own mirrors, then the main Ubuntu ones. Other sources (a PPA) have one URL.
+    local -a urls=()
     case "$url" in
-        */ubuntu/pool/*)
-            local tail="${url#*/ubuntu/}"
-            urls+=("http://azure.archive.ubuntu.com/ubuntu/$tail" "http://archive.ubuntu.com/ubuntu/$tail" "http://us.archive.ubuntu.com/ubuntu/$tail")
+        mirror+file:*|*.ubuntu.com/ubuntu/pool/*)
+            local pool="pool/${url#*/pool/}" base
+            while read -r base _; do
+                case "$base" in http*) urls+=("${base%/}/$pool") ;; esac
+            done < /etc/apt/apt-mirrors.txt 2>/dev/null || true
+            [[ "$url" == http* ]] && urls+=("$url")
+            urls+=("http://azure.archive.ubuntu.com/ubuntu/$pool" "http://archive.ubuntu.com/ubuntu/$pool" "http://us.archive.ubuntu.com/ubuntu/$pool")
             ;;
+        *) urls+=("$url") ;;
     esac
     local round candidate
     for round in 1 2 3; do
