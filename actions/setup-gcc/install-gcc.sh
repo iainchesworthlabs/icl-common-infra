@@ -55,12 +55,68 @@ save_to_cache() {
     chmod -R a+rX "$DEB_DIR"
 }
 
+# Download one package into apt's archive directory, ahead of apt-get install, which then finds it there and
+# downloads nothing. apt's own downloader gave up on the big GCC packages (95 MB, 90 MB, 83 MB) on 10 and 11
+# November 2026: one Ubuntu mirror node stalled each file for 30 s then "Ign", on all four attempts. This one
+# resumes a part file (curl -C -), abandons a transfer that runs slower than 200 kB/s for 10 s, and rotates
+# through the main Ubuntu mirrors, so a slow node costs seconds. The hash apt printed (SHA256, or MD5 where the index has no better) is checked, and apt
+# checks it again. Arguments: URL, file name, size, ALGORITHM:hash (the fields of `apt-get --print-uris`).
+fetch_one() {
+    local url="$1" name="$2" size="$3" algo="${4%%:*}" hash="${4#*:}" sum
+    case "$algo" in
+        SHA512) sum=sha512sum ;;
+        SHA256) sum=sha256sum ;;
+        SHA1) sum=sha1sum ;;
+        *) sum=md5sum ;;
+    esac
+    local dir=/var/cache/apt/archives part
+    part="$dir/partial/$name"
+    if [ -f "$dir/$name" ] && [ "$($sum "$dir/$name" | cut -d' ' -f1)" = "$hash" ]; then return 0; fi
+    local -a urls=("$url")
+    case "$url" in
+        */ubuntu/pool/*)
+            local tail="${url#*/ubuntu/}"
+            urls+=("http://azure.archive.ubuntu.com/ubuntu/$tail" "http://archive.ubuntu.com/ubuntu/$tail" "http://us.archive.ubuntu.com/ubuntu/$tail")
+            ;;
+    esac
+    local round candidate
+    for round in 1 2 3; do
+        for candidate in "${urls[@]}"; do
+            if curl -fsSL --connect-timeout 10 --max-time 300 --speed-limit 200000 --speed-time 10 \
+                    -C - -o "$part" "$candidate" 2>/dev/null; then
+                if [ "$($sum "$part" | cut -d' ' -f1)" = "$hash" ]; then
+                    mv -f "$part" "$dir/$name"
+                    echo "fetched $name from ${candidate%%/ubuntu/*}"
+                    return 0
+                fi
+                rm -f "$part"
+            elif [ -f "$part" ] && [ "$(stat -c %s "$part")" -gt "$size" ]; then
+                rm -f "$part"
+            fi
+        done
+    done
+    echo "::warning title=apt-get::could not fetch $name; apt will try"
+    return 1
+}
+export -f fetch_one
+
+# Fetch what `apt-get install` of the packages would download, four files at a time. Best effort: whatever is
+# missing afterwards is downloaded by apt itself.
+fetch_debs() {
+    mkdir -p /var/cache/apt/archives/partial
+    apt-get install -y --no-install-recommends --print-uris "$@" 2>/dev/null |
+        sed -n "s/^'\([^']*\)' \([^ ]*\) \([0-9]*\) \([A-Za-z0-9]*:[0-9a-f]*\)\$/\1 \2 \3 \4/p" |
+        xargs -r -P 4 -L 1 bash -c 'fetch_one "$@"' _ || true
+}
+export -f fetch_debs
+
 apt_retry() {
     local attempt=1
     # The download is a step of its own with a time limit: a transfer that stalls on the mirror is
     # killed and tried again, which is safe before anything is unpacked. apt's own timeouts do not fire
     # for it. The install then reads only the local cache. A normal download of GCC takes under a minute.
     until timeout 180 apt-get update && { [ "$#" -eq 0 ] || {
+        timeout 420 bash -c 'fetch_debs "$@"' _ "$@"
         timeout 150 apt-get install -y --download-only --no-install-recommends "$@" &&
             apt-get install -y --no-install-recommends "$@"; }; }
     do
