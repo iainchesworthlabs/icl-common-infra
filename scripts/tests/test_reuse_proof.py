@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -43,8 +44,9 @@ def proof_zip(run_id, tested=T, repository=REPO, schema=1):
 
 
 class FakeApi:
-    def __init__(self, runs=(), jobs=None, artifacts=True, zips=None, fail=None):
+    def __init__(self, runs=(), jobs=None, artifacts=True, zips=None, fail=None, compare="diverged"):
         self.runs, self.jobs, self.artifacts, self.zips, self.fail = list(runs), jobs or {}, artifacts, zips or {}, fail
+        self.compare = compare
         self.calls = []
 
     def get(self, path, params=None):
@@ -65,6 +67,8 @@ class FakeApi:
         if path.endswith("/artifacts"):
             rid = int(path.split("/")[-2])
             return {"artifacts": [{"id": rid}] if self.artifacts else []}
+        if "/compare/" in path:
+            return {"status": self.compare}
         if "/pulls/" in path:
             return {"head": {"sha": H, "ref": "feature/x", "repo": {"full_name": REPO}}}
         raise AssertionError(path)
@@ -208,6 +212,20 @@ class Reuse(unittest.TestCase):
         res = decide(FakeApi([pr], zips={1: z}), FakeRepo(ancestors=()))
         self.assertIn("base's history", "; ".join(res["notes"]))
 
+    def test_a_shallow_clone_asks_github_whether_the_parent_is_on_the_base_history(self):
+        pr, z = self.pr_run()
+        for status, reused in (("ahead", True), ("identical", True), ("diverged", False), ("behind", False)):
+            res = decide(FakeApi([pr], zips={1: z}, compare=status), FakeRepo(ancestors=()))
+            self.assertEqual(bool(res["reused"]), reused, status)
+            if not reused:
+                self.assertIn("base's history", "; ".join(res["notes"]))
+
+    def test_a_compare_error_refuses(self):
+        pr, z = self.pr_run()
+        res = decide(FakeApi([pr], zips={1: z}, fail="/compare/"), FakeRepo(ancestors=()))
+        self.assertEqual(res["reused"], {})
+        self.assertIn("compare", "; ".join(res["notes"]))
+
     def test_a_tested_commit_newer_than_the_run_refuses(self):
         pr, z = self.pr_run()
         res = decide(FakeApi([pr], zips={1: z}), FakeRepo(committed=NOW))
@@ -334,3 +352,36 @@ class Main(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShallowParents(unittest.TestCase):
+    """Repo.parents on a shallow clone, the way the reuse job fetches (a queue entry's proof was refused for it)."""
+
+    def git(self, *args, cwd):
+        subprocess.run(["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+
+    def test_parents_of_a_shallow_merge_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dst = Path(tmp) / "src", Path(tmp) / "dst"
+            src.mkdir()
+            self.git("init", "-q", "-b", "main", cwd=src)
+            (src / "a").write_text("a")
+            self.git("add", "a", cwd=src)
+            self.git("commit", "-q", "-m", "base", cwd=src)
+            self.git("switch", "-q", "-c", "topic", cwd=src)
+            (src / "b").write_text("b")
+            self.git("add", "b", cwd=src)
+            self.git("commit", "-q", "-m", "topic", cwd=src)
+            self.git("switch", "-q", "main", cwd=src)
+            (src / "c").write_text("c")
+            self.git("add", "c", cwd=src)
+            self.git("commit", "-q", "-m", "main", cwd=src)
+            self.git("merge", "-q", "--no-ff", "-m", "merge", "topic", cwd=src)
+            merge = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            first, second = (subprocess.run(["git", "-C", str(src), "rev-parse", f"HEAD^{n}"], capture_output=True,
+                                            text=True).stdout.strip() for n in (1, 2))
+            subprocess.run(["git", "init", "-q", str(dst)], check=True)
+            subprocess.run(["git", "-C", str(dst), "fetch", "-q", "--no-tags", "--depth=1", str(src), merge], check=True)
+            repo = r.Repo(str(dst))
+            self.assertEqual(repo.parents(merge), [first, second])
