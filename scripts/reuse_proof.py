@@ -112,7 +112,10 @@ class Repo:
         return self._git("diff", "--name-only", "--no-renames", a, b).splitlines()
 
     def parents(self, sha: str) -> list[str]:
-        return self._git("rev-list", "--parents", "-n", "1", sha).split()[1:]
+        # Read from the commit object itself: the checkout and the fetches are shallow, and `rev-list --parents`
+        # hides the parents of a shallow commit (so a pull request's test merge looked like it had none).
+        return [line.split()[1] for line in self._git("cat-file", "commit", sha).splitlines()
+                if line.startswith("parent ")]
 
     def committed_at(self, sha: str) -> datetime:
         return datetime.fromtimestamp(int(self._git("show", "-s", "--format=%ct", sha)), timezone.utc)
@@ -214,6 +217,12 @@ def green_groups(api: Api, run: dict, groups_cfg: dict) -> set[str]:
     return green
 
 
+def api_is_ancestor(api: Api, ancestor: str, descendant: str) -> bool:
+    """Whether GitHub says `ancestor` is on the history of `descendant`. The local clone is shallow and cannot."""
+    data = api.get(f"repos/{{r}}/compare/{ancestor}...{descendant}") or {}
+    return data.get("status") in ("ahead", "identical")
+
+
 def tested_commit(api: Api, repo: Repo, run: dict, ctx: dict) -> str:
     """The commit a run checked out. A pull request run says so only in its own artifact."""
     if run["event"] != "pull_request":
@@ -236,7 +245,7 @@ def tested_commit(api: Api, repo: Repo, run: dict, ctx: dict) -> str:
     parents = repo.parents(sha)
     if len(parents) != 2 or parents[1] != run["head_sha"]:
         raise Refused("tested commit is not a merge of the run's head")
-    if not repo.is_ancestor(parents[0], ctx["base_sha"]):
+    if not repo.is_ancestor(parents[0], ctx["base_sha"]) and not api_is_ancestor(api, parents[0], ctx["base_sha"]):
         raise Refused("tested commit's first parent is not on the base's history")
     if repo.committed_at(sha) > parse_time(run["created_at"]):
         raise Refused("tested commit is newer than the run")
