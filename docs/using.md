@@ -70,7 +70,11 @@ the checkout and after `setup-msvc-env`. The reusable workflows do this themselv
 
 Scripts run by a caller job (the planner, the coverage gate) come from the same commit as the
 workflow: call `actions/checkout-infra` after the caller's own checkout and use `.icl-infra/scripts/...`.
-The commit is read from the `uses:` line, so Dependabot's bump of that line moves the scripts too.
+The commit is read from the `uses:` line, so a bump of that line moves the scripts too.
+
+Pin the newest tag (`gh api repos/iainchesworthlabs/icl-common-infra/tags --jq '.[0].name'`), and move to each new one when
+it is cut. In a project, `tools/ci/repin.py` moves every `uses:` line and `cmake/icl` to a tag in one change, which is the
+pull request to open; section 12.3 of the standard says why it is not a commit on Dependabot's branch.
 
 ## Compilers
 
