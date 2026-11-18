@@ -36,7 +36,7 @@ barrier; the checks in the workflow are a second one).
 
 The artifact is the built site as it is (not the Pages tarball): build with `docs.yml` and `site-artifact: docs-site`.
 Its top level must hold `index.html`. Inputs reach the shell only through environment variables, and `prefix` must be a
-lower-case slug. `region` defaults to `us-east-1`, `site-url` to `https://iainchesworthlabs.com`. Previews are public to
+lower-case slug. `region` defaults to `ap-southeast-4` (Melbourne; Sydney is `ap-southeast-2`), `site-url` to `https://iainchesworthlabs.com`. Previews are public to
 anyone with the link; combine them with an S3 lifecycle rule and `noindex` on `_preview/` (see the site stack).
 
 A caller, with `vars.DOCS_ROLE_ARN`, `vars.DOCS_BUCKET` and `vars.DOCS_DISTRIBUTION_ID` set on the repository:

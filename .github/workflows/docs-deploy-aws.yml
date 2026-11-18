@@ -59,7 +59,7 @@ on:
       region:
         description: AWS region of the bucket and the role session.
         type: string
-        default: us-east-1
+        default: ap-southeast-4
       site-url:
         description: Public origin of the site, used in the preview comment.
         type: string
