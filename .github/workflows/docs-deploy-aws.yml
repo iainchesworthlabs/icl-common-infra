@@ -1,0 +1,269 @@
+name: Docs deploy AWS
+
+# Reusable. Publishes a built docs site to a private S3 bucket behind CloudFront, with no stored
+# keys: the job assumes an IAM role by OIDC (aws-actions/configure-aws-credentials). The role
+# ARN, bucket, distribution ID and region come from the caller (inputs, normally from
+# repository variables); there are no secrets.
+#
+# mode `deploy`
+#   - push to the production ref (default refs/heads/main): sync the artifact to
+#     s3://<bucket>/<prefix>/ with --delete, then invalidate /<prefix>/*.
+#   - preview (`preview: true`, with `pr-number`): only for a pull request from this same
+#     repository. Sync to s3://<bucket>/_preview/<prefix>/pr-<n>/, invalidate that folder, and
+#     comment the URL on the pull request (one comment, updated on each push).
+# mode `remove-preview`
+#   - on a closed pull request: delete _preview/<prefix>/pr-<n>/, invalidate it, and mark the
+#     comment as removed.
+#
+# The artifact is a plain upload of the built site (docs.yml with `site-artifact: <name>`), not
+# the Pages artifact.
+#
+# The calling job needs `needs:` on the build job and must grant
+# `contents: read`, `id-token: write` and `pull-requests: write`. Example caller: docs/using.md.
+#
+# This repository is public, so the first step of each job masks the role ARN, the bucket name, the
+# distribution ID and the account ID (parsed from the ARN) in the logs, and no later step prints them.
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: deploy or remove-preview.
+        type: string
+        default: deploy
+      artifact-name:
+        description: Name of the uploaded built-site artifact (deploy only).
+        type: string
+        default: docs-site
+      prefix:
+        description: Path of the site on the bucket and the domain, for example field-test.
+        type: string
+        required: true
+      preview:
+        description: Deploy a pull request preview instead of production.
+        type: boolean
+        default: false
+      pr-number:
+        description: Pull request number (preview and remove-preview).
+        type: string
+        default: ""
+      role-arn:
+        description: ARN of the IAM role to assume by OIDC.
+        type: string
+        required: true
+      bucket:
+        description: Name of the S3 bucket.
+        type: string
+        required: true
+      distribution-id:
+        description: CloudFront distribution ID, for the invalidation.
+        type: string
+        required: true
+      region:
+        description: AWS region of the bucket and the role session.
+        type: string
+        default: ap-southeast-2
+      site-url:
+        description: Public origin of the site, used in the preview comment.
+        type: string
+        default: https://iainchesworthlabs.com
+      production-ref:
+        description: The only ref a production deploy may run from.
+        type: string
+        default: refs/heads/main
+
+permissions: {}
+
+jobs:
+  deploy:
+    name: Deploy to AWS
+    if: inputs.mode == 'deploy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - name: Mask the account details
+        shell: bash
+        env:
+          ROLE_ARN: ${{ inputs.role-arn }}
+          BUCKET: ${{ inputs.bucket }}
+          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+        run: |
+          set -euo pipefail
+          account=$(cut -d: -f5 <<< "$ROLE_ARN")
+          for value in "$ROLE_ARN" "$BUCKET" "$DISTRIBUTION_ID" "$account"; do
+            [ -n "$value" ] && echo "::add-mask::$value"
+          done
+          true
+
+      - name: Check the request
+        shell: bash
+        env:
+          PREFIX: ${{ inputs.prefix }}
+          PREVIEW: ${{ inputs.preview }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          PRODUCTION_REF: ${{ inputs.production-ref }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+        run: |
+          set -euo pipefail
+          [[ "$PREFIX" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::prefix '$PREFIX' is not a lower-case slug"; exit 1; }
+          if [ "$PREVIEW" = "true" ]; then
+            [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::a preview needs a numeric pr-number"; exit 1; }
+            if [ "$HEAD_REPO" != "$REPO" ] || [ "$BASE_REPO" != "$REPO" ]; then
+              echo "::error::previews are for pull requests from this repository only, not forks"
+              exit 1
+            fi
+          elif [ "$REF" != "$PRODUCTION_REF" ]; then
+            echo "::error::production deploys run from $PRODUCTION_REF only, not $REF"
+            exit 1
+          fi
+
+      - name: Download the built site
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: site
+
+      - name: Check the site
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -f site/index.html ] || { echo "::error::the artifact has no index.html at its top level"; exit 1; }
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ inputs.role-arn }}
+          aws-region: ${{ inputs.region }}
+          role-session-name: docs-deploy-${{ github.run_id }}
+
+      - name: Sync to S3
+        shell: bash
+        env:
+          BUCKET: ${{ inputs.bucket }}
+          PREFIX: ${{ inputs.prefix }}
+          PREVIEW: ${{ inputs.preview }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          set -euo pipefail
+          if [ "$PREVIEW" = "true" ]; then
+            key="_preview/$PREFIX/pr-$PR_NUMBER"
+          else
+            key="$PREFIX"
+          fi
+          echo "KEY=$key" >> "$GITHUB_ENV"
+          aws --no-cli-pager s3 sync site/ "s3://$BUCKET/$key/" --delete --only-show-errors
+
+      - name: Invalidate CloudFront
+        shell: bash
+        env:
+          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+        run: |
+          set -euo pipefail
+          aws --no-cli-pager cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/$KEY/*" "/$KEY" --query Invalidation.Id --output text
+
+      - name: Comment the preview URL
+        if: inputs.preview
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE_URL: ${{ inputs.site-url }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          url="${SITE_URL%/}/$KEY/"
+          marker="<!-- docs-deploy-aws:$KEY -->"
+          body="$marker"$'\n'"Docs preview: $url"$'\n\n'"Built from ${SHA:0:7}. It is public to anyone with the link and is removed when this pull request closes."
+          id=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body="$body" > /dev/null
+          fi
+
+  remove-preview:
+    name: Remove the preview
+    if: inputs.mode == 'remove-preview'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - name: Mask the account details
+        shell: bash
+        env:
+          ROLE_ARN: ${{ inputs.role-arn }}
+          BUCKET: ${{ inputs.bucket }}
+          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+        run: |
+          set -euo pipefail
+          account=$(cut -d: -f5 <<< "$ROLE_ARN")
+          for value in "$ROLE_ARN" "$BUCKET" "$DISTRIBUTION_ID" "$account"; do
+            [ -n "$value" ] && echo "::add-mask::$value"
+          done
+          true
+
+      - name: Check the request
+        id: check
+        shell: bash
+        env:
+          PREFIX: ${{ inputs.prefix }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          [[ "$PREFIX" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::prefix '$PREFIX' is not a lower-case slug"; exit 1; }
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::remove-preview needs a numeric pr-number"; exit 1; }
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "A fork never had a preview; nothing to remove."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assume the deploy role
+        if: steps.check.outputs.skip != 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ inputs.role-arn }}
+          aws-region: ${{ inputs.region }}
+          role-session-name: docs-remove-preview-${{ github.run_id }}
+
+      - name: Delete the preview and invalidate
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          BUCKET: ${{ inputs.bucket }}
+          PREFIX: ${{ inputs.prefix }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+        run: |
+          set -euo pipefail
+          key="_preview/$PREFIX/pr-$PR_NUMBER"
+          echo "KEY=$key" >> "$GITHUB_ENV"
+          aws --no-cli-pager s3 rm "s3://$BUCKET/$key/" --recursive --only-show-errors
+          aws --no-cli-pager cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/$key/*" "/$key" --query Invalidation.Id --output text
+
+      - name: Mark the comment removed
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          marker="<!-- docs-deploy-aws:$KEY -->"
+          id=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$marker"$'\n'"Docs preview removed: this pull request is closed." > /dev/null
+          fi

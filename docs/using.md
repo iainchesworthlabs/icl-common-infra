@@ -12,11 +12,78 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 | `policy.yml` | Branch name, commit and PR text, preprocessor policy, action pinning, changelog fragment, vcpkg baseline in fork, REUSE. Runs on drafts. | `base-ref`, `runner`, `skip-changelog` |
 | `build.yml` | Build and test a list of legs with CMake presets. | `legs` (JSON, see the file header; a leg may set `timeout_minutes`, default the input), `timeout-minutes` |
 | `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON; an entry may name a CodeQL `queries` suite, or set `skip_qt` for a build that does not use Qt) |
-| `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`. | `requirements`, `upload` |
+| `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`, and the plain site as an artifact when `site-artifact` is set. | `requirements`, `upload`, `site-artifact` |
 | `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
+| `docs-deploy-aws.yml` | Publishes the built site to S3 behind CloudFront by OIDC, or removes a pull request preview. Needs `contents: read`, `id-token: write` and `pull-requests: write` on the calling job. See "Docs on AWS". | `prefix`, `role-arn`, `bucket`, `distribution-id`, `mode`, `artifact-name`, `preview`, `pr-number`, `region`, `site-url`, `production-ref` |
 | `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `pre-release-script`, `spdx-sbom`, `cyclonedx-sbom`, `notes-script`, `draft`, `title` |
 | `zizmor.yml` | Workflow static analysis, at the version the caller pins in `ci/requirements-zizmor.txt` (or this repository's, without the file). | `min-severity`, `requirements-file` |
 | `dependabot-auto-merge.yml` | Enable auto-merge when every dependency a Dependabot pull request updates is a minor or patch bump in an allowed ecosystem (a grouped pull request with one major waits for a person). | `ecosystems`, `merge-method` (empty for a branch with a merge queue), secret `MERGE_QUEUE_TOKEN` |
+
+## Docs on AWS
+
+`docs-deploy-aws.yml` is the sibling of `docs-deploy.yml` for a site served from a private S3 bucket behind CloudFront
+(for example `https://iainchesworthlabs.com/field-test/`). It holds no repository-specific logic and uses no secrets: the
+job assumes an IAM role by OIDC with `aws-actions/configure-aws-credentials`, so the caller grants `id-token: write`.
+The role ARN, bucket and distribution ID are not secret; keep them in repository variables. One role per app, limited to
+its own prefix and to `_preview/<prefix>/*`, trusted for that repository only (the role's trust policy is the real
+barrier; the checks in the workflow are a second one).
+
+Keep those values in the caller's repository variables (not in the workflow file, and not as secrets). Because this
+repository is public, the first step of each job masks the role ARN, the bucket name, the distribution ID and the account
+ID (parsed from the ARN) with `::add-mask::` before anything else runs, and no later step prints them: the `aws` commands
+run with `--no-cli-pager` and quiet output, and the preview comment holds only the public URL. Masking is a log
+protection, not a secret: the role still cannot be assumed except by a run the trust policy allows.
+
+| Mode | When | What it does |
+|---|---|---|
+| `deploy` | push to `main` (`production-ref`) | `aws s3 sync --delete` to `s3://<bucket>/<prefix>/`, then invalidates `/<prefix>/*`. Any other ref fails. |
+| `deploy` with `preview: true` and `pr-number` | pull request from this repository | Same, to `_preview/<prefix>/pr-<n>/`, then comments `<site-url>/_preview/<prefix>/pr-<n>/` on the pull request (one comment, updated on each push). A pull request from a fork fails. |
+| `remove-preview` | pull request closed | Deletes `_preview/<prefix>/pr-<n>/`, invalidates it, and marks the comment removed. A fork is skipped. |
+
+The artifact is the built site as it is (not the Pages tarball): build with `docs.yml` and `site-artifact: docs-site`.
+Its top level must hold `index.html`. Inputs reach the shell only through environment variables, and `prefix` must be a
+lower-case slug. `region` defaults to `ap-southeast-2` (Sydney), `site-url` to `https://iainchesworthlabs.com`. Previews are public to
+anyone with the link; combine them with an S3 lifecycle rule and `noindex` on `_preview/` (see the site stack).
+
+A caller, with `vars.DOCS_ROLE_ARN`, `vars.DOCS_BUCKET` and `vars.DOCS_DISTRIBUTION_ID` set on the repository:
+
+```yaml
+on:
+  push: { branches: [main] }
+  pull_request: { types: [opened, synchronize, reopened, closed] }
+permissions: {}
+jobs:
+  build:
+    if: github.event.action != 'closed'
+    permissions: { contents: read }
+    uses: iainchesworthlabs/icl-common-infra/.github/workflows/docs.yml@<sha>  # v0.1.N
+    with: { site-artifact: docs-site }
+  deploy:
+    needs: build
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions: { contents: read, id-token: write, pull-requests: write }
+    uses: iainchesworthlabs/icl-common-infra/.github/workflows/docs-deploy-aws.yml@<sha>  # v0.1.N
+    with:
+      prefix: field-test
+      preview: ${{ github.event_name == 'pull_request' }}
+      pr-number: ${{ github.event.pull_request.number }}
+      role-arn: ${{ vars.DOCS_ROLE_ARN }}
+      bucket: ${{ vars.DOCS_BUCKET }}
+      distribution-id: ${{ vars.DOCS_DISTRIBUTION_ID }}
+  remove-preview:
+    if: github.event.action == 'closed'
+    permissions: { contents: read, id-token: write, pull-requests: write }
+    uses: iainchesworthlabs/icl-common-infra/.github/workflows/docs-deploy-aws.yml@<sha>  # v0.1.N
+    with:
+      mode: remove-preview
+      prefix: field-test
+      pr-number: ${{ github.event.pull_request.number }}
+      role-arn: ${{ vars.DOCS_ROLE_ARN }}
+      bucket: ${{ vars.DOCS_BUCKET }}
+      distribution-id: ${{ vars.DOCS_DISTRIBUTION_ID }}
+```
+
+On a push to `main`, `github.event.pull_request.number` is empty and `preview` is false, so it is ignored.
 
 ## Planner and aggregator
 
