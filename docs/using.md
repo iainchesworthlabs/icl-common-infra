@@ -28,6 +28,12 @@ The role ARN, bucket and distribution ID are not secret; keep them in repository
 its own prefix and to `_preview/<prefix>/*`, trusted for that repository only (the role's trust policy is the real
 barrier; the checks in the workflow are a second one).
 
+Keep those values in the caller's repository variables (not in the workflow file, and not as secrets). Because this
+repository is public, the first step of each job masks the role ARN, the bucket name, the distribution ID and the account
+ID (parsed from the ARN) with `::add-mask::` before anything else runs, and no later step prints them: the `aws` commands
+run with `--no-cli-pager` and quiet output, and the preview comment holds only the public URL. Masking is a log
+protection, not a secret: the role still cannot be assumed except by a run the trust policy allows.
+
 | Mode | When | What it does |
 |---|---|---|
 | `deploy` | push to `main` (`production-ref`) | `aws s3 sync --delete` to `s3://<bucket>/<prefix>/`, then invalidates `/<prefix>/*`. Any other ref fails. |

@@ -43,7 +43,7 @@ class DocsDeployAws(unittest.TestCase):
             self.assertNotIn("${{", run)
 
     def test_production_syncs_with_delete_to_the_prefix(self):
-        self.assertIn('aws s3 sync site/ "s3://$BUCKET/$key/" --delete', TEXT)
+        self.assertIn('aws --no-cli-pager s3 sync site/ "s3://$BUCKET/$key/" --delete', TEXT)
         self.assertIn('key="$PREFIX"', TEXT)
 
     def test_preview_goes_under_the_preview_prefix(self):
@@ -61,13 +61,32 @@ class DocsDeployAws(unittest.TestCase):
         self.assertIn("if: inputs.mode == 'deploy'", job("deploy"))
         self.assertIn("if: inputs.mode == 'remove-preview'", job("remove-preview"))
         for name in ("deploy", "remove-preview"):
-            self.assertIn("aws cloudfront create-invalidation", job(name))
+            self.assertIn("aws --no-cli-pager cloudfront create-invalidation", job(name))
 
     def test_every_uses_is_pinned_to_a_sha(self):
         uses = re.findall(r"uses: (\S+)@(\S+) # (v\S+)", TEXT)
         self.assertEqual(len(uses), TEXT.count("uses:"))
         for _, ref, _ in uses:
             self.assertRegex(ref, r"^[0-9a-f]{40}$")
+
+    def test_masks_come_first_and_cover_every_value(self):
+        for name in ("deploy", "remove-preview"):
+            block = job(name)
+            first = re.search(r"      - name: (.+)\n", block).group(1)
+            self.assertEqual(first, "Mask the account details", name)
+            mask = block.index("Mask the account details")
+            self.assertLess(mask, block.index("Check the request"), name)
+            self.assertLess(mask, block.index("configure-aws-credentials"), name)
+            head = block[mask:block.index("Check the request")]
+            for needle in ("ROLE_ARN", "BUCKET", "DISTRIBUTION_ID", "cut -d: -f5", "::add-mask::"):
+                self.assertIn(needle, head, name)
+
+    def test_aws_commands_never_page_or_print_values(self):
+        for line in re.findall(r"^\s+aws .*$", TEXT, re.M):
+            self.assertIn("--no-cli-pager", line)
+        for line in TEXT.splitlines():
+            if re.search(r"echo|body=", line) and "add-mask" not in line:
+                self.assertNotRegex(line, r"\$\{?(ROLE_ARN|BUCKET|DISTRIBUTION_ID|account)")
 
 
 if __name__ == "__main__":

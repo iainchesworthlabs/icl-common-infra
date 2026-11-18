@@ -20,6 +20,9 @@ name: Docs deploy AWS
 #
 # The calling job needs `needs:` on the build job and must grant
 # `contents: read`, `id-token: write` and `pull-requests: write`. Example caller: docs/using.md.
+#
+# This repository is public, so the first step of each job masks the role ARN, the bucket name, the
+# distribution ID and the account ID (parsed from the ARN) in the logs, and no later step prints them.
 
 on:
   workflow_call:
@@ -82,6 +85,20 @@ jobs:
       id-token: write
       pull-requests: write
     steps:
+      - name: Mask the account details
+        shell: bash
+        env:
+          ROLE_ARN: ${{ inputs.role-arn }}
+          BUCKET: ${{ inputs.bucket }}
+          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+        run: |
+          set -euo pipefail
+          account=$(cut -d: -f5 <<< "$ROLE_ARN")
+          for value in "$ROLE_ARN" "$BUCKET" "$DISTRIBUTION_ID" "$account"; do
+            [ -n "$value" ] && echo "::add-mask::$value"
+          done
+          true
+
       - name: Check the request
         shell: bash
         env:
@@ -141,7 +158,7 @@ jobs:
             key="$PREFIX"
           fi
           echo "KEY=$key" >> "$GITHUB_ENV"
-          aws s3 sync site/ "s3://$BUCKET/$key/" --delete --only-show-errors
+          aws --no-cli-pager s3 sync site/ "s3://$BUCKET/$key/" --delete --only-show-errors
 
       - name: Invalidate CloudFront
         shell: bash
@@ -149,7 +166,7 @@ jobs:
           DISTRIBUTION_ID: ${{ inputs.distribution-id }}
         run: |
           set -euo pipefail
-          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/$KEY/*" "/$KEY" --query Invalidation.Id --output text
+          aws --no-cli-pager cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/$KEY/*" "/$KEY" --query Invalidation.Id --output text
 
       - name: Comment the preview URL
         if: inputs.preview
@@ -182,6 +199,20 @@ jobs:
       id-token: write
       pull-requests: write
     steps:
+      - name: Mask the account details
+        shell: bash
+        env:
+          ROLE_ARN: ${{ inputs.role-arn }}
+          BUCKET: ${{ inputs.bucket }}
+          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+        run: |
+          set -euo pipefail
+          account=$(cut -d: -f5 <<< "$ROLE_ARN")
+          for value in "$ROLE_ARN" "$BUCKET" "$DISTRIBUTION_ID" "$account"; do
+            [ -n "$value" ] && echo "::add-mask::$value"
+          done
+          true
+
       - name: Check the request
         id: check
         shell: bash
@@ -219,8 +250,8 @@ jobs:
           set -euo pipefail
           key="_preview/$PREFIX/pr-$PR_NUMBER"
           echo "KEY=$key" >> "$GITHUB_ENV"
-          aws s3 rm "s3://$BUCKET/$key/" --recursive --only-show-errors
-          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/$key/*" "/$key" --query Invalidation.Id --output text
+          aws --no-cli-pager s3 rm "s3://$BUCKET/$key/" --recursive --only-show-errors
+          aws --no-cli-pager cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/$key/*" "/$key" --query Invalidation.Id --output text
 
       - name: Mark the comment removed
         if: steps.check.outputs.skip != 'true'
