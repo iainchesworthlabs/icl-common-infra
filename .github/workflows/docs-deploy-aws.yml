@@ -1,28 +1,34 @@
 name: Docs deploy AWS
 
 # Reusable. Publishes a built docs site to a private S3 bucket behind CloudFront, with no stored
-# keys: the job assumes an IAM role by OIDC (aws-actions/configure-aws-credentials). The role
-# ARN, bucket, distribution ID and region come from the caller (inputs, normally from
-# repository variables); there are no secrets.
+# keys: the job assumes an IAM role by OIDC (aws-actions/configure-aws-credentials).
+#
+# The role ARNs, the bucket name and the distribution ID are `secrets:` of this workflow, not
+# inputs. This repository is public and GitHub prints a step's `with:` and `env:` in the log before
+# a `::add-mask::` could run, so only a secret keeps them (and the account ID in an ARN) out of
+# the logs. They are not credentials: the role can be assumed only by a run its trust policy allows.
 #
 # mode `deploy`
 #   - push to the production ref (default refs/heads/main): sync the artifact to
-#     s3://<bucket>/<prefix>/ with --delete, then invalidate /<prefix>/*.
+#     s3://<bucket>/<prefix>/ with --delete, then invalidate /<prefix>/*. Uses DOCS_ROLE_ARN.
 #   - preview (`preview: true`, with `pr-number`): only for a pull request from this same
 #     repository. Sync to s3://<bucket>/_preview/<prefix>/pr-<n>/, invalidate that folder, and
-#     comment the URL on the pull request (one comment, updated on each push).
+#     comment the URL on the pull request (one comment, updated on each push). Uses
+#     DOCS_PREVIEW_ROLE_ARN, a role limited to `_preview/<prefix>/*`.
 # mode `remove-preview`
 #   - on a closed pull request: delete _preview/<prefix>/pr-<n>/, invalidate it, and mark the
-#     comment as removed.
+#     comment as removed. Uses DOCS_PREVIEW_ROLE_ARN.
+#
+# A pull request from a fork, or from Dependabot, gets no secrets: the job then skips every step
+# with a notice or warning instead of failing. The same happens when a secret is not set.
+# A production deploy from any ref other than `production-ref` fails.
 #
 # The artifact is a plain upload of the built site (docs.yml with `site-artifact: <name>`), not
 # the Pages artifact.
 #
 # The calling job needs `needs:` on the build job and must grant
-# `contents: read`, `id-token: write` and `pull-requests: write`. Example caller: docs/using.md.
-#
-# This repository is public, so the first step of each job masks the role ARN, the bucket name, the
-# distribution ID and the account ID (parsed from the ARN) in the logs, and no later step prints them.
+# `contents: read`, `id-token: write` and `pull-requests: write`, and pass the secrets one by one
+# (`secrets: inherit` also works). Example caller: docs/using.md.
 
 on:
   workflow_call:
@@ -47,18 +53,6 @@ on:
         description: Pull request number (preview and remove-preview).
         type: string
         default: ""
-      role-arn:
-        description: ARN of the IAM role to assume by OIDC.
-        type: string
-        required: true
-      bucket:
-        description: Name of the S3 bucket.
-        type: string
-        required: true
-      distribution-id:
-        description: CloudFront distribution ID, for the invalidation.
-        type: string
-        required: true
       region:
         description: AWS region of the bucket and the role session.
         type: string
@@ -71,6 +65,19 @@ on:
         description: The only ref a production deploy may run from.
         type: string
         default: refs/heads/main
+    secrets:
+      DOCS_ROLE_ARN:
+        description: ARN of the production deploy role (prefix only).
+        required: false
+      DOCS_PREVIEW_ROLE_ARN:
+        description: ARN of the preview role (_preview/<prefix>/ only).
+        required: false
+      DOCS_BUCKET:
+        description: Name of the S3 bucket.
+        required: false
+      DOCS_DISTRIBUTION_ID:
+        description: CloudFront distribution ID, for the invalidation.
+        required: false
 
 permissions: {}
 
@@ -85,21 +92,8 @@ jobs:
       id-token: write
       pull-requests: write
     steps:
-      - name: Mask the account details
-        shell: bash
-        env:
-          ROLE_ARN: ${{ inputs.role-arn }}
-          BUCKET: ${{ inputs.bucket }}
-          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
-        run: |
-          set -euo pipefail
-          account=$(cut -d: -f5 <<< "$ROLE_ARN")
-          for value in "$ROLE_ARN" "$BUCKET" "$DISTRIBUTION_ID" "$account"; do
-            [ -n "$value" ] && echo "::add-mask::$value"
-          done
-          true
-
       - name: Check the request
+        id: check
         shell: bash
         env:
           PREFIX: ${{ inputs.prefix }}
@@ -110,43 +104,74 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+          HAVE_ROLE: ${{ secrets.DOCS_ROLE_ARN != '' }}
+          HAVE_PREVIEW_ROLE: ${{ secrets.DOCS_PREVIEW_ROLE_ARN != '' }}
+          HAVE_BUCKET: ${{ secrets.DOCS_BUCKET != '' }}
+          HAVE_DISTRIBUTION: ${{ secrets.DOCS_DISTRIBUTION_ID != '' }}
         run: |
           set -euo pipefail
           [[ "$PREFIX" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::prefix '$PREFIX' is not a lower-case slug"; exit 1; }
           if [ "$PREVIEW" = "true" ]; then
             [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::a preview needs a numeric pr-number"; exit 1; }
             if [ "$HEAD_REPO" != "$REPO" ] || [ "$BASE_REPO" != "$REPO" ]; then
-              echo "::error::previews are for pull requests from this repository only, not forks"
+              echo "::notice::No preview: a pull request from a fork gets no deploy role."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            have_role="$HAVE_PREVIEW_ROLE"
+            role_name=DOCS_PREVIEW_ROLE_ARN
+          else
+            if [ "$REF" != "$PRODUCTION_REF" ]; then
+              echo "::error::production deploys run from $PRODUCTION_REF only, not $REF"
               exit 1
             fi
-          elif [ "$REF" != "$PRODUCTION_REF" ]; then
-            echo "::error::production deploys run from $PRODUCTION_REF only, not $REF"
-            exit 1
+            have_role="$HAVE_ROLE"
+            role_name=DOCS_ROLE_ARN
+          fi
+          missing=""
+          [ "$have_role" = "true" ] || missing="$missing $role_name"
+          [ "$HAVE_BUCKET" = "true" ] || missing="$missing DOCS_BUCKET"
+          [ "$HAVE_DISTRIBUTION" = "true" ] || missing="$missing DOCS_DISTRIBUTION_ID"
+          if [ -n "$missing" ]; then
+            echo "::warning::Not deployed: secret(s) not available to this run:$missing. A Dependabot run has its own secrets, and a missing one needs setting on the repository."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download the built site
+        if: steps.check.outputs.skip != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ inputs.artifact-name }}
           path: site
 
       - name: Check the site
+        if: steps.check.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
           [ -f site/index.html ] || { echo "::error::the artifact has no index.html at its top level"; exit 1; }
 
-      - name: Assume the deploy role
+      - name: Assume the production role
+        if: steps.check.outputs.skip != 'true' && !inputs.preview
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ inputs.role-arn }}
+          role-to-assume: ${{ secrets.DOCS_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
           role-session-name: docs-deploy-${{ github.run_id }}
 
+      - name: Assume the preview role
+        if: steps.check.outputs.skip != 'true' && inputs.preview
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.DOCS_PREVIEW_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+          role-session-name: docs-preview-${{ github.run_id }}
+
       - name: Sync to S3
+        if: steps.check.outputs.skip != 'true'
         shell: bash
         env:
-          BUCKET: ${{ inputs.bucket }}
+          BUCKET: ${{ secrets.DOCS_BUCKET }}
           PREFIX: ${{ inputs.prefix }}
           PREVIEW: ${{ inputs.preview }}
           PR_NUMBER: ${{ inputs.pr-number }}
@@ -161,15 +186,16 @@ jobs:
           aws --no-cli-pager s3 sync site/ "s3://$BUCKET/$key/" --delete --only-show-errors
 
       - name: Invalidate CloudFront
+        if: steps.check.outputs.skip != 'true'
         shell: bash
         env:
-          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+          DISTRIBUTION_ID: ${{ secrets.DOCS_DISTRIBUTION_ID }}
         run: |
           set -euo pipefail
           aws --no-cli-pager cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/$KEY/*" "/$KEY" --query Invalidation.Id --output text
 
       - name: Comment the preview URL
-        if: inputs.preview
+        if: steps.check.outputs.skip != 'true' && inputs.preview
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -199,20 +225,6 @@ jobs:
       id-token: write
       pull-requests: write
     steps:
-      - name: Mask the account details
-        shell: bash
-        env:
-          ROLE_ARN: ${{ inputs.role-arn }}
-          BUCKET: ${{ inputs.bucket }}
-          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
-        run: |
-          set -euo pipefail
-          account=$(cut -d: -f5 <<< "$ROLE_ARN")
-          for value in "$ROLE_ARN" "$BUCKET" "$DISTRIBUTION_ID" "$account"; do
-            [ -n "$value" ] && echo "::add-mask::$value"
-          done
-          true
-
       - name: Check the request
         id: check
         shell: bash
@@ -221,20 +233,32 @@ jobs:
           PR_NUMBER: ${{ inputs.pr-number }}
           REPO: ${{ github.repository }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HAVE_PREVIEW_ROLE: ${{ secrets.DOCS_PREVIEW_ROLE_ARN != '' }}
+          HAVE_BUCKET: ${{ secrets.DOCS_BUCKET != '' }}
+          HAVE_DISTRIBUTION: ${{ secrets.DOCS_DISTRIBUTION_ID != '' }}
         run: |
           set -euo pipefail
           [[ "$PREFIX" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || { echo "::error::prefix '$PREFIX' is not a lower-case slug"; exit 1; }
           [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::remove-preview needs a numeric pr-number"; exit 1; }
           if [ "$HEAD_REPO" != "$REPO" ]; then
-            echo "A fork never had a preview; nothing to remove."
+            echo "::notice::A fork never had a preview; nothing to remove."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          missing=""
+          [ "$HAVE_PREVIEW_ROLE" = "true" ] || missing="$missing DOCS_PREVIEW_ROLE_ARN"
+          [ "$HAVE_BUCKET" = "true" ] || missing="$missing DOCS_BUCKET"
+          [ "$HAVE_DISTRIBUTION" = "true" ] || missing="$missing DOCS_DISTRIBUTION_ID"
+          if [ -n "$missing" ]; then
+            echo "::warning::Preview not removed: secret(s) not available to this run:$missing."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Assume the deploy role
+      - name: Assume the preview role
         if: steps.check.outputs.skip != 'true'
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ inputs.role-arn }}
+          role-to-assume: ${{ secrets.DOCS_PREVIEW_ROLE_ARN }}
           aws-region: ${{ inputs.region }}
           role-session-name: docs-remove-preview-${{ github.run_id }}
 
@@ -242,10 +266,10 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         shell: bash
         env:
-          BUCKET: ${{ inputs.bucket }}
+          BUCKET: ${{ secrets.DOCS_BUCKET }}
           PREFIX: ${{ inputs.prefix }}
           PR_NUMBER: ${{ inputs.pr-number }}
-          DISTRIBUTION_ID: ${{ inputs.distribution-id }}
+          DISTRIBUTION_ID: ${{ secrets.DOCS_DISTRIBUTION_ID }}
         run: |
           set -euo pipefail
           key="_preview/$PREFIX/pr-$PR_NUMBER"
