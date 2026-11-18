@@ -150,7 +150,11 @@ class Fragment(unittest.TestCase):
         self.assertTrue(frag.check({"changelog.d/x.fixed.md": "**a**\n\nb"}, [], False))
 
     def test_changelog_edit_rejected(self):
-        self.assertTrue(frag.check({}, ["CHANGELOG.md"], True))
+        self.assertTrue(frag.check({}, ["CHANGELOG.md"], False))
+        self.assertTrue(frag.check({}, ["src/a.cpp", "CHANGELOG.md"], False))
+
+    def test_changelog_edit_allowed_for_release_assembly(self):
+        self.assertEqual(frag.check({}, ["CHANGELOG.md", "CMakeLists.txt", "changelog.d/a.fixed.md"], True), [])
 
 
 if __name__ == "__main__":

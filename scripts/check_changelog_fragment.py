@@ -6,8 +6,10 @@
 
 A pull request adds at least one changelog.d/<slug>.<type>.md unless it carries the
 no-changelog label (--no-changelog) or changes only documentation, tests, CI
-or tooling. Every fragment it adds must be well formed. CHANGELOG.md is never edited
-by a pull request (it is assembled from the fragments at release time).
+or tooling. Every fragment it adds must be well formed. CHANGELOG.md is not edited by an
+ordinary pull request (it is assembled from the fragments at release time); the pull request
+that assembles a release (changelog_tool.py assemble) carries the no-changelog label and is the
+only one that may edit it.
 
 <type> is one of added, changed, deprecated, removed, fixed, security.
 The content is one bold-led paragraph.
@@ -38,8 +40,9 @@ def user_visible(path: str) -> bool:
 
 def check(added_fragments: dict[str, str], changed: list[str], no_changelog: bool) -> list[str]:
     problems = []
-    if "CHANGELOG.md" in changed:
-        problems.append("CHANGELOG.md is assembled at release time; add a fragment in changelog.d/ instead")
+    if "CHANGELOG.md" in changed and not no_changelog:
+        problems.append("CHANGELOG.md is assembled at release time; add a fragment in changelog.d/ instead "
+                        "(the pull request that assembles a release carries the no-changelog label)")
     for rel, text in added_fragments.items():
         if not NAME.match(rel):
             problems.append(f"{rel}: name must be changelog.d/<slug>.<type>.md with type in {', '.join(TYPES)}")
