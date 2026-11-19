@@ -338,10 +338,17 @@ jobs:
             done
             return 1
           }
+          # gh says only that it could not verify. Its last message and the verbose trace are kept so that a failure
+          # shows why (an unreadable bundle, a certificate, the transparency log, the trusted root).
+          verify_log="$RUNNER_TEMP/verify.log"
+          verify_one() { gh attestation verify "$1" --repo "$REPO" --verbose > "$verify_log" 2>&1; }
           first=""
           while IFS= read -r f; do
             if [ -z "$first" ]; then first="$f"; fi
-            if ! retry gh attestation verify "$f" --repo "$REPO" > /dev/null 2>&1; then
+            if ! retry verify_one "$f"; then
+              echo "::group::gh attestation verify $f ($(gh --version | head -n 1))"
+              cat "$verify_log"
+              echo "::endgroup::"
               echo "::error::no verifiable attestation for $f"
               exit 1
             fi
@@ -352,13 +359,17 @@ jobs:
             local predicate="$1" file="$2" ok=false
             for _ in 1 2 3 4 5 6; do
               if gh attestation verify "$first" --repo "$REPO" --predicate-type "$predicate" \
-                   --format json --jq '.[0].verificationResult.statement.predicate' > "$RUNNER_TEMP/attested.json"; then
+                   --format json --jq '.[0].verificationResult.statement.predicate' \
+                   > "$RUNNER_TEMP/attested.json" 2> "$verify_log"; then
                 ok=true
                 break
               fi
               sleep 10
             done
             if [ "$ok" != "true" ]; then
+              echo "::group::gh attestation verify --predicate-type $predicate $first"
+              cat "$verify_log"
+              echo "::endgroup::"
               echo "::error::no verifiable $predicate attestation for $first"
               exit 1
             fi
