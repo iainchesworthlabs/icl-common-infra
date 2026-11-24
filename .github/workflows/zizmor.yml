@@ -20,13 +20,17 @@ on:
         description: Requirements file of the caller that pins zizmor.
         type: string
         default: ci/requirements-zizmor.txt
+      runner:
+        description: JSON array of runner labels.
+        type: string
+        default: '["ubuntu-24.04"]'
 
 permissions: {}
 
 jobs:
   zizmor:
     name: zizmor
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 15
     permissions:
       contents: read

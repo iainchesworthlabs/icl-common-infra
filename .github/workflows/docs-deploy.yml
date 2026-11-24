@@ -7,13 +7,18 @@ name: Docs deploy
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        description: JSON array of runner labels.
+        type: string
+        default: '["ubuntu-24.04"]'
 
 permissions: {}
 
 jobs:
   deploy:
     name: Deploy to Pages
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 10
     permissions:
       pages: write

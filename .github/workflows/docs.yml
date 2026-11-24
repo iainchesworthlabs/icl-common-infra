@@ -25,13 +25,17 @@ on:
           docs-deploy-aws.yml. Empty means no upload.
         type: string
         default: ""
+      runner:
+        description: JSON array of runner labels.
+        type: string
+        default: '["ubuntu-24.04"]'
 
 permissions: {}
 
 jobs:
   build:
     name: Build docs
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 20
     permissions:
       contents: read

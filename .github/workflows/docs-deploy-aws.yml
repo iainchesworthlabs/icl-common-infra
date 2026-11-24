@@ -65,6 +65,10 @@ on:
         description: The only ref a production deploy may run from.
         type: string
         default: refs/heads/main
+      runner:
+        description: JSON array of runner labels.
+        type: string
+        default: '["ubuntu-24.04"]'
     secrets:
       DOCS_ROLE_ARN:
         description: ARN of the production deploy role (prefix only).
@@ -85,7 +89,7 @@ jobs:
   deploy:
     name: Deploy to AWS
     if: inputs.mode == 'deploy'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -218,7 +222,7 @@ jobs:
   remove-preview:
     name: Remove the preview
     if: inputs.mode == 'remove-preview'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 10
     permissions:
       contents: read
