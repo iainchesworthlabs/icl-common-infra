@@ -412,7 +412,7 @@ CI speed and cost is a design constraint, not a tuning step. `iclforge/docs/ci-a
 
 ### 11.6 Runners and caches
 
-- GitHub-hosted runners by default. A self-hosted fleet is optional and used through a `decide-runner` action that falls back to hosted runners when the fleet is busy (`iclforge/.github/actions/decide-runner`).
+- GitHub-hosted runners by default. A self-hosted fleet is optional and used through a `decide-runner` action that falls back to hosted runners when the fleet is busy (`iclforge/.github/actions/decide-runner`). A reusable workflow that has jobs of its own takes an optional `runner` input (a JSON array of labels, default `["ubuntu-24.04"]`) so that a repository can run all of them on its own runners (`docs/using.md`, "Runners"). A pull request from a fork never runs on a self-hosted runner, and a caller that routes to one passes the hosted default for such a pull request or skips the job.
 - vcpkg binary cache, ccache, and Qt install cache are keyed on the toolchain pin file and the vcpkg baseline. A `cache-hygiene` workflow deletes branch caches when a pull request closes.
 - Qt installs and vcpkg builds happen once per leg in a composite action from `icl-common-infra`.
 

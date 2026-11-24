@@ -33,6 +33,10 @@ on:
           branch that has one: the queue chooses the method and `gh pr merge --auto` refuses a flag.
         type: string
         default: squash
+      runner:
+        description: JSON array of runner labels.
+        type: string
+        default: '["ubuntu-24.04"]'
     secrets:
       MERGE_QUEUE_TOKEN:
         required: false
@@ -43,7 +47,7 @@ jobs:
   auto-merge:
     name: Enable auto-merge
     if: github.event.pull_request.user.login == 'dependabot[bot]'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 5
     permissions:
       contents: read

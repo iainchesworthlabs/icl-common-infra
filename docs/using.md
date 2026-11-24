@@ -11,13 +11,49 @@ defines two jobs by name: `CI Status` (using the `ci-status` action) and
 |---|---|---|
 | `policy.yml` | Branch name, commit and PR text, preprocessor policy, action pinning, changelog fragment, vcpkg baseline in fork, REUSE. Runs on drafts. | `base-ref`, `runner`, `skip-changelog` |
 | `build.yml` | Build and test a list of legs with CMake presets. | `legs` (JSON, see the file header; a leg may set `timeout_minutes`, default the input), `timeout-minutes` |
-| `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON; an entry may name a CodeQL `queries` suite, or set `skip_qt` for a build that does not use Qt) |
-| `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`, and the plain site as an artifact when `site-artifact` is set. | `requirements`, `upload`, `site-artifact` |
-| `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | none |
-| `docs-deploy-aws.yml` | Publishes the built site to S3 behind CloudFront by OIDC, or removes a pull request preview. Needs `contents: read`, `id-token: write` and `pull-requests: write` on the calling job. See "Docs on AWS". | `prefix`, `mode`, `artifact-name`, `preview`, `pr-number`, `region`, `site-url`, `production-ref`; secrets `DOCS_ROLE_ARN`, `DOCS_PREVIEW_ROLE_ARN`, `DOCS_BUCKET`, `DOCS_DISTRIBUTION_ID` |
+| `codeql.yml` | Nightly code scanning; opens a `nightly-analysis` issue on failure. | `languages` (JSON; an entry may name a CodeQL `queries` suite, or set `skip_qt` for a build that does not use Qt), `runner` |
+| `docs.yml` | `mkdocs build --strict`; uploads the Pages artifact when `upload: true`, and the plain site as an artifact when `site-artifact` is set. | `requirements`, `upload`, `site-artifact`, `runner` |
+| `docs-deploy.yml` | Publishes the Pages artifact from the same run. Needs `pages: write` and `id-token: write` on the calling job. | `runner` |
+| `docs-deploy-aws.yml` | Publishes the built site to S3 behind CloudFront by OIDC, or removes a pull request preview. Needs `contents: read`, `id-token: write` and `pull-requests: write` on the calling job. See "Docs on AWS". | `prefix`, `mode`, `artifact-name`, `preview`, `pr-number`, `region`, `site-url`, `production-ref`, `runner`; secrets `DOCS_ROLE_ARN`, `DOCS_PREVIEW_ROLE_ARN`, `DOCS_BUCKET`, `DOCS_DISTRIBUTION_ID` |
 | `release-publish.yml` | Tag checks, release notes check, SHA-512 sums, GPG signatures checked against the committed public key, SBOM, attestations, optional project verification, GitHub Release, fast-forward of `main`. | `artifact-pattern`, `generate-sbom`, `public-key`, `verify-script`, `pre-release-script`, `spdx-sbom`, `cyclonedx-sbom`, `notes-script`, `draft`, `title` |
-| `zizmor.yml` | Workflow static analysis, at the version the caller pins in `ci/requirements-zizmor.txt` (or this repository's, without the file). | `min-severity`, `requirements-file` |
-| `dependabot-auto-merge.yml` | Enable auto-merge when every dependency a Dependabot pull request updates is a minor or patch bump in an allowed ecosystem (a grouped pull request with one major waits for a person). | `ecosystems`, `merge-method` (empty for a branch with a merge queue), secret `MERGE_QUEUE_TOKEN` |
+| `zizmor.yml` | Workflow static analysis, at the version the caller pins in `ci/requirements-zizmor.txt` (or this repository's, without the file). | `min-severity`, `requirements-file`, `runner` |
+| `dependabot-auto-merge.yml` | Enable auto-merge when every dependency a Dependabot pull request updates is a minor or patch bump in an allowed ecosystem (a grouped pull request with one major waits for a person). | `ecosystems`, `merge-method` (empty for a branch with a merge queue), `runner`, secret `MERGE_QUEUE_TOKEN` |
+
+## Runners
+
+`policy.yml`, `codeql.yml`, `zizmor.yml`, `docs.yml`, `docs-deploy.yml`, `docs-deploy-aws.yml` and
+`dependabot-auto-merge.yml` take an optional `runner` input: a JSON array of runner labels, default `["ubuntu-24.04"]`.
+Every job of the workflow uses it as `runs-on: ${{ fromJSON(inputs.runner) }}`, including the preview removal of
+`docs-deploy-aws.yml`. A caller that does not pass it gets the hosted `ubuntu-24.04` job it always had. `build.yml` takes
+a `runner` per leg, and `release-publish.yml` has no such input: it runs on hosted `ubuntu-24.04`.
+
+```yaml
+jobs:
+  zizmor:
+    uses: iainchesworthlabs/icl-common-infra/.github/workflows/zizmor.yml@<sha>  # v0.1.N
+    with:
+      runner: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","Linux","X64","shared"]' || '["ubuntu-24.04"]' }}
+```
+
+- **A pull request from a fork never runs on a self-hosted runner.** The fork's author chooses what the job runs (the
+  docs requirements file, the scripts, the calling workflow itself) and a self-hosted runner outlives the job and sits
+  inside the organisation's network. The expression above gives a fork the hosted default; a repository that has no hosted minutes
+  skips the job for a fork instead (an `if:` on the calling job). Pull requests from the repository itself, Dependabot's
+  included, and pushes, merge groups and schedules may use the fleet. The `decide-runner` action applies the same
+  rule when it picks a runner.
+- **A repository that must use its own runners passes `runner` in every call**, the closed-pull-request removal of a
+  preview included. A job left on the default asks for a hosted runner, and when the hosted minutes are used up it does
+  not start.
+- **The label list is a conjunction**: the runner must carry every label in the array.
+- **A self-hosted image needs the tools a workflow does not install itself.** Hosted images carry `git`, `bash`, `curl`
+  and `jq`, the GitHub CLI (`gh`) and the AWS CLI, and the workflows use them without installing them: `gh` in
+  `docs-deploy-aws.yml` (the preview comment) and `dependabot-auto-merge.yml`, `jq` in `dependabot-auto-merge.yml`, `aws` (version 2) in
+  `docs-deploy-aws.yml`. What the workflows install themselves is Python 3.12 with `actions/setup-python` (`docs.yml`
+  and `zizmor.yml`) and then the pip packages of the docs requirements or of zizmor. That needs an operating system and
+  architecture for which `actions/setup-python` publishes builds, a writable tool cache and a route to the Python and pip
+  indexes. The actions that run on Node need nothing beyond the runner application.
+- **The secrets and the identity go to the runner too.** `docs-deploy-aws.yml` asks for an OIDC token to assume the
+  deploy role and `dependabot-auto-merge.yml` reads `MERGE_QUEUE_TOKEN`; send them only to runners that may hold them.
 
 ## Docs on AWS
 
