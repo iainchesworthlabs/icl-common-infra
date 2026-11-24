@@ -244,7 +244,13 @@ update-alternatives --install /usr/bin/gcc gcc "/usr/bin/gcc-${GCC_VERSION}" "${
 update-alternatives --set gcc "/usr/bin/gcc-${GCC_VERSION}"
 
 # Verify
-echo "==> GCC $(gcc --version | head -1) installed"
-echo "==> gcov $(gcov --version | head -1) installed"
-gcc --version | head -1 | grep -q "${GCC_VERSION}" || { echo "ERROR: gcc version mismatch"; exit 1; }
-gcov --version | head -1 | grep -q "${GCC_VERSION}" || { echo "ERROR: gcov version mismatch"; exit 1; }
+# (The output is captured first: a pipe into head under pipefail fails with SIGPIPE when the tool is
+# still writing after the first line.)
+gcc_out="$(gcc --version)"
+gcov_out="$(gcov --version)"
+gcc_first="$(head -n 1 <<< "$gcc_out")"
+gcov_first="$(head -n 1 <<< "$gcov_out")"
+echo "==> GCC $gcc_first installed"
+echo "==> gcov $gcov_first installed"
+grep -q "${GCC_VERSION}" <<< "$gcc_first" || { echo "ERROR: gcc version mismatch"; exit 1; }
+grep -q "${GCC_VERSION}" <<< "$gcov_first" || { echo "ERROR: gcov version mismatch"; exit 1; }

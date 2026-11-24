@@ -118,10 +118,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${CXX:-}" ]; then "$CXX" --version | head -2
-          elif [ "$RUNNER_OS" = Windows ]; then cl 2>&1 | head -1
-          else c++ --version | head -2
+          # Captured first: a pipe into head under pipefail fails the step (SIGPIPE) when the compiler
+          # is still writing after the lines that are wanted.
+          if [ -n "${CXX:-}" ]; then out="$("$CXX" --version)"; lines=2
+          elif [ "$RUNNER_OS" = Windows ]; then out="$(cl 2>&1)"; lines=1
+          else out="$(c++ --version)"; lines=2
           fi
+          head -n "$lines" <<< "$out"
 
       - name: Configure
         shell: bash

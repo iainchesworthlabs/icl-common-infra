@@ -206,8 +206,12 @@ update-alternatives --set lld "/usr/bin/lld-${LLVM_VERSION}"
 update-alternatives --install /usr/bin/llvm-symbolizer llvm-symbolizer "/usr/bin/llvm-symbolizer-${LLVM_VERSION}" 100
 update-alternatives --set llvm-symbolizer "/usr/bin/llvm-symbolizer-${LLVM_VERSION}"
 
-echo "==> Clang $(clang --version | head -1) installed"
+# (The output is captured first: a pipe into head, or into grep -q, under pipefail fails with
+# SIGPIPE when clang is still writing after the line the reader wanted.)
+clang_out="$(clang --version)"
+clang_first="$(head -n 1 <<< "$clang_out")"
+echo "==> Clang $clang_first installed"
 
 # Guard against a silent major-version drift (e.g. the distro moving clang to 23).
-clang --version | grep -qE "version ${LLVM_VERSION}\." \
+grep -qE "version ${LLVM_VERSION}\." <<< "$clang_out" \
     || { echo "ERROR: clang is not version ${LLVM_VERSION}"; exit 1; }
