@@ -157,7 +157,10 @@ runs:
           if "$VCPKG_DIR/$TOOL" version --disable-metrics >/dev/null 2>&1; then
             touch "$VCPKG_DIR/vcpkg.disable-metrics"
             echo "vcpkg tool restored from the Actions cache; no bootstrap download"
-            "$VCPKG_DIR/$TOOL" version --disable-metrics | head -1
+            # The output is captured first: a pipe into head under pipefail fails the step
+            # with 141 (SIGPIPE) whenever the tool is still writing after the first line.
+            version="$("$VCPKG_DIR/$TOOL" version --disable-metrics)"
+            head -n 1 <<< "$version"
             exit 0
           fi
           echo "::warning::the cached vcpkg tool does not run; bootstrapping instead"

@@ -374,7 +374,8 @@ jobs:
           while IFS= read -r f; do
             if [ -z "$first" ]; then first="$f"; fi
             if ! retry verify_one "$f"; then
-              echo "::group::gh attestation verify $f ($(gh --version | head -n 1))"
+              gh_version="$(gh --version || true)"
+              echo "::group::gh attestation verify $f ($(head -n 1 <<< "$gh_version"))"
               cat "$verify_log"
               echo "::endgroup::"
               if ! cosign_attested "$f" https://slsa.dev/provenance/v1 slsaprovenance1; then
