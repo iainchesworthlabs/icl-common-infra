@@ -55,6 +55,45 @@ jobs:
 - **The secrets and the identity go to the runner too.** `docs-deploy-aws.yml` asks for an OIDC token to assume the
   deploy role and `dependabot-auto-merge.yml` reads `MERGE_QUEUE_TOKEN`; send them only to runners that may hold them.
 
+## CodeQL permissions
+
+The `analyze` job of `codeql.yml` asks for four permissions, and the workflow's own top-level block is empty:
+
+| Permission | What needs it |
+|---|---|
+| `security-events: write` | `github/codeql-action/analyze` uploads the results to code scanning. |
+| `contents: read` | The checkout; a private repository has no anonymous read. |
+| `actions: read` | The CodeQL action asks the API for this workflow run (`GET /repos/{owner}/{repo}/actions/runs/{run_id}`) to name the analysis. A private repository refuses the call with "Resource not accessible by integration" when the token lacks it. |
+| `issues: write` | The `report-nightly-failure` step opens or updates the `nightly-analysis` issue. |
+
+A called workflow cannot have more than its caller grants: its token is the calling job's, narrowed by the `permissions:`
+of the called job. **The calling job must therefore grant the same four.** A caller that grants fewer does not run the
+analysis: GitHub rejects the run at startup and names the nested job and the permission. A caller that grants more gains
+nothing, because the job's own block narrows it back, so grant exactly these. Write the block on the calling job, with
+an empty `permissions: {}` at the top of the calling workflow, rather than depend on the repository's default token
+permissions, which differ between repositories.
+
+```yaml
+name: CodeQL
+on:
+  schedule: [{ cron: "17 3 * * *" }]
+  workflow_dispatch:
+permissions: {}
+jobs:
+  codeql:
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+      issues: write
+    uses: iainchesworthlabs/icl-common-infra/.github/workflows/codeql.yml@<sha>  # v0.1.N
+    with:
+      languages: '[{"language":"cpp","build_mode":"manual","preset":"<preset>","vcpkg":true}]'
+```
+
+The same four go on the job whether the run comes from the schedule or from `workflow_dispatch`; a manual run uses the
+same token as a scheduled one. A caller that routes the job to its own runners passes `runner` as well (see Runners).
+
 ## Docs on AWS
 
 `docs-deploy-aws.yml` is the sibling of `docs-deploy.yml` for a site served from a private S3 bucket behind CloudFront

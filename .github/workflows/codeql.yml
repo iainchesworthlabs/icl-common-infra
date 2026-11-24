@@ -34,10 +34,13 @@ jobs:
     name: Analyze (${{ matrix.language }})
     runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 90
+    # A called job's token is the calling job's, narrowed by this block: the caller must grant
+    # all four (docs/using.md, "CodeQL permissions"), or the run does not start.
     permissions:
-      security-events: write
-      contents: read
-      issues: write
+      security-events: write # upload the results to code scanning
+      contents: read # check out the repository
+      actions: read # the CodeQL action reads this workflow run through the API; a private repository is refused without it
+      issues: write # open or update the nightly-analysis issue when the analysis fails
     strategy:
       fail-fast: false
       matrix:
