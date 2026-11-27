@@ -81,6 +81,18 @@ runs:
         ICL_DEB_CACHE: ${{ steps.deps.outputs.debdir }}
       run: sudo --preserve-env=ICL_DEB_CACHE bash "$GITHUB_ACTION_PATH/install-deps.sh"
 
+    # hashFiles() reads only files under GITHUB_WORKSPACE and the package directory is under $HOME, so a hashFiles test of
+    # its .new marker was always empty and the save below never ran. The install script leaves .new when it downloaded
+    # packages; this step turns that into an output for the save step to test.
+    - name: Note whether packages were downloaded
+      id: fresh
+      if: steps.deps.outcome == 'success'
+      shell: bash
+      env:
+        DEB_DIR: ${{ steps.deps.outputs.debdir }}
+      run: |
+        if [ -e "$DEB_DIR/.new" ]; then echo "new=true" >> "$GITHUB_OUTPUT"; fi
+
     - name: Install Qt
       if: steps.pins.outputs.version != ''
       uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
@@ -99,7 +111,7 @@ runs:
         steps.deps.outcome == 'success' && steps.debs.outputs.cache-hit != 'true'
         && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         && github.ref_name == github.event.repository.default_branch
-        && hashFiles(format('{0}/.new', steps.deps.outputs.debdir)) != ''
+        && steps.fresh.outputs.new == 'true'
       continue-on-error: true
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
