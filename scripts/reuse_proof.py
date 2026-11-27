@@ -356,9 +356,16 @@ def run_job(api: Api, repo: Repo, ctx: dict, mode: str, plan_config: str, planne
     return out
 
 
+def output_value(value) -> str:
+    """A value on one line. The runner fails a step whose GITHUB_OUTPUT has a line that is not name=value, and the
+    reason of a fallback is the text of an error, which is often several lines."""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, separators=(",", ":"))
+    return " ".join(str(value).split())
+
+
 def write_outputs(out: dict, path: str | None) -> None:
-    lines = [f"{k}={json.dumps(v, separators=(',', ':')) if isinstance(v, (list, dict)) else v}"
-             for k, v in out.items()]
+    lines = [f"{k}={output_value(v)}" for k, v in out.items()]
     if path:
         with open(path, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
