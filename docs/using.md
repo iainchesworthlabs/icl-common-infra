@@ -419,6 +419,24 @@ branch, `workflow_run` after the CI workflow finished saving its caches, and `wo
 purge. The rules and the key shapes are in the header of `scripts/prune_actions_cache.sh`, which can also be run by hand
 (`gh` with `actions: write`, and `jq`).
 
+**Permissions.** The job needs `actions: write` to delete. In a **private** repository it needs `contents: read` and
+`pull-requests: read` as well, because the script lists the branches and tags that still exist and the open pull requests
+(whose `refs/pull/<n>/merge` entries are alive) with the job's own token, and a job that grants itself only the first
+gets `GraphQL: Resource not accessible by integration (repository.pullRequests)` from `gh pr list` and the run fails (a dry
+run too). A public repository's job has run green with `actions: write` and `contents: read` alone, which is why the third line is easy to miss; the block below works in either:
+
+```yaml
+    permissions:
+      actions: write # delete cache entries (gh cache delete)
+      contents: read # list the branches and tags that still exist
+      pull-requests: read # list the open pull requests, whose merge refs still exist
+```
+
+Put it on the job and keep `permissions: {}` at the top of the workflow. **A `workflow_run` trigger is read from the default
+branch**: a workflow file that has only reached a feature branch never runs on it, so the first run after a CI run happens once
+the workflow is on the default branch, and a pull request's own run (with `pull_request`, or a temporary dry-run trigger on
+the branch, as a way to look before enabling it) is the way to try the job before that. A dry run needs the same permissions.
+
 ### Who writes the caches
 
 `setup-vcpkg` and `setup-ccache` take a `cache-write` input, `auto` by default. With `auto`, only a push, scheduled or

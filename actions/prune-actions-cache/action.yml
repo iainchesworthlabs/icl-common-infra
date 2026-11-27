@@ -8,10 +8,15 @@ description: >-
   reset for a vcpkg cache that has carried stale archives too long. See
   scripts/prune_actions_cache.sh for the rules and the key shapes it knows.
 
-  The calling job needs `actions: write`, and `gh` and `jq` on the runner (both are on the
-  hosted images and on the fleet image). Triggers belong to the caller: a closed or pushed pull
-  request, a push to the default branch, a finished CI run, a manual dispatch. A run on a fork's
-  pull request cannot delete anything and should not call this.
+  The calling job needs `actions: write` to delete and, in a private repository, `contents: read`
+  (the branches and tags that still exist) and `pull-requests: read` (the open pull requests,
+  whose merge refs still exist) as well: without the last the run stops with `GraphQL: Resource
+  not accessible by integration (repository.pullRequests)`. It also needs `gh` and `jq` on the
+  runner (both are on the hosted images and on the fleet image). Triggers belong to the caller: a
+  closed or pushed pull request, a push to the default branch, a finished CI run, a manual
+  dispatch. A `workflow_run` trigger is read from the default branch, so it takes effect only
+  once the workflow is there. A run on a fork's pull request cannot delete anything and should
+  not call this. docs/using.md ("Actions cache hygiene") has the permissions block to copy.
 
 inputs:
   dry-run:
