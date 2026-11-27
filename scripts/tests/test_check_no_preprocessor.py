@@ -42,6 +42,16 @@ class ScanText(unittest.TestCase):
         hard, _ = c.scan_text("#if FOO || \\\n    _MSC_VER\n#endif\n")
         self.assertEqual(len(hard), 1)
 
+    def test_a_quote_in_a_character_literal_does_not_hide_the_next_line(self):
+        # The stripper does not know character literals, so the '"' opens a string that ends at the end of the line.
+        # It must stop there and leave the line break, or the next line is glued to this one and its directive is missed.
+        hard, _ = c.scan_text("char q = '\"';\n#ifdef _WIN32\nint x;\n#endif\n")
+        self.assertEqual([(h[0], h[1]) for h in hard], [(2, "ifdef")])
+
+    def test_a_string_continued_over_a_line_keeps_the_line_numbers(self):
+        hard, _ = c.scan_text('const char* s = "a\\\nb";\n#ifdef _WIN32\n#endif\n')
+        self.assertEqual([(h[0], h[1]) for h in hard], [(3, "ifdef")])
+
 
 class Cli(unittest.TestCase):
     def run_cli(self, files, baseline=None, allow=None, *extra):
