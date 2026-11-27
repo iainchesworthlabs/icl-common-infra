@@ -34,6 +34,12 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+      - name: Probe ImageVersion
+        run: |
+          echo "expression env.ImageVersion=[${{ env.ImageVersion }}]"
+          echo "shell ImageVersion=[${ImageVersion:-}] ImageOS=[${ImageOS:-}]"
+          echo "date iso week: $(date -u +%G-%V)"
+          apt-get --version | head -1
       - name: Run the tests
         run: python3 -m unittest discover -s scripts/tests -v
 
