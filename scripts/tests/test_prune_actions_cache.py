@@ -118,6 +118,34 @@ class Plan(unittest.TestCase):
         rows = self.dropped(done.stdout)
         self.assertEqual([(r[0], r[2]) for r in rows], [("superseded", f"vcpkg-tool-Linux-X64-2026-06-01-{HEX16}")])
 
+    def test_vcpkg_generations_are_one_family_with_and_without_a_lineage(self):
+        # vcpkg[-downloads]-<OS>-<ARCH>-<40 hex>-<64 hex>[-<lineage>][-<16 hex>]: the optional lineage must not take the 16 hex
+        # characters of the content hash for itself, or every generation of a key with no lineage is a family of one and
+        # none is ever superseded.
+        base = "vcpkg-Linux-X64-" + "a" * 40 + "-" + HEX64
+        old, new = "1111111111111111", "2222222222222222"
+        done = self.run_plan(
+            [
+                cache(1, f"{base}-core-{old}", "refs/heads/develop", "2026-10-01T00:00:00Z"),
+                cache(2, f"{base}-core-{new}", "refs/heads/develop", "2026-10-02T00:00:00Z"),
+                cache(3, f"{base}-{old}", "refs/heads/develop", "2026-10-01T00:00:00Z"),
+                cache(4, f"{base}-{new}", "refs/heads/develop", "2026-10-02T00:00:00Z"),
+                cache(5, f"{base}-qt-{new}", "refs/heads/develop", "2026-10-03T00:00:00Z"),
+                cache(6, f"{base}-core", "refs/heads/other", "2026-10-01T00:00:00Z"),
+            ],
+            ["refs/heads/develop", "refs/heads/other"],
+            "--grace-minutes",
+            "0",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # The plan table cuts a key at 90 characters, which is before the end of these, so the older generation of each of the
+        # two families goes (two rows), and what stays is told by the table of families: the lineage `core` has the newer
+        # entry of develop and the one of the other branch, `qt` and the key with no lineage have one each.
+        self.assertEqual([r[0] for r in self.dropped(done.stdout)], ["superseded", "superseded"])
+        self.assertIn("| vcpkg:Linux-X64-core | 2 | 2 MB |", done.stdout)
+        self.assertIn("| vcpkg:Linux-X64 | 1 | 1 MB |", done.stdout)
+        self.assertIn("| vcpkg:Linux-X64-qt | 1 | 1 MB |", done.stdout)
+
     def test_purge_prefix_goes_on_every_ref(self):
         done = self.run_plan(
             [
