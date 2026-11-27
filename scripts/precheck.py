@@ -69,6 +69,21 @@ def git(root: Path, *args: str) -> str:
     return res.stdout.strip() if res.returncode == 0 else ""
 
 
+def branch_name_result(root: Path, branch: str) -> Result:
+    """The branch name check as the policy workflow runs it: with the prefixes of the project's own
+    .github/branch-prefixes.txt as well as the built-in ones."""
+    prefix_file = root / check_branch_name.PREFIX_FILE
+    extra: list[str] = []
+    if prefix_file.is_file():
+        try:
+            extra = check_branch_name.read_prefixes(prefix_file.read_text(encoding="utf-8"))
+        except ValueError as problem:
+            return Result("branch name", "fail", f"{check_branch_name.PREFIX_FILE}: {problem}")
+    if check_branch_name.ok(branch, extra):
+        return Result("branch name", "pass")
+    return Result("branch name", "fail", f"'{branch}' is not an allowed branch name")
+
+
 def default_base(root: Path) -> str:
     for ref in ("origin/develop", "develop", "origin/main", "main"):
         if git(root, "rev-parse", "--verify", "--quiet", ref):
@@ -87,8 +102,7 @@ def main(argv=None) -> int:
     results: list[Result] = []
 
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
-    results.append(Result("branch name", "pass" if check_branch_name.ok(branch) else "fail",
-                          "" if check_branch_name.ok(branch) else f"'{branch}' is not an allowed branch name"))
+    results.append(branch_name_result(root, branch))
     results.append(run(root, "commit text", [py, str(HERE / "check_text_policy.py"), "commits", f"{base}..HEAD"]))
     results.append(run(root, "committed files text", [py, str(HERE / "check_text_policy.py"), "files"]))
     if (root / "tools/preprocessor-baseline.json").exists():
