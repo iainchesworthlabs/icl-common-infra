@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -385,3 +386,34 @@ class ShallowParents(unittest.TestCase):
             subprocess.run(["git", "-C", str(dst), "fetch", "-q", "--no-tags", "--depth=1", str(src), merge], check=True)
             repo = r.Repo(str(dst))
             self.assertEqual(repo.parents(merge), [first, second])
+
+
+class Outputs(unittest.TestCase):
+    """The file GITHUB_OUTPUT. The runner fails the step on a line that is not `name=value`, and find-proof promises
+    never to fail, so a value that holds a line break (a git or gh error is several lines) must not reach the file as one."""
+
+    def test_a_value_with_line_breaks_is_one_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.txt"
+            r.write_outputs({"run": [], "mode": "fallback",
+                             "reason": "git fetch: fatal: no remote\nfatal: Could not read\n\nPlease check\r\nthe rights"}, str(path))
+            lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines[0], "run=[]")
+        for line in lines:
+            self.assertRegex(line, r"^[a-z_]+=")
+        self.assertEqual(lines[-1], "reason=git fetch: fatal: no remote fatal: Could not read Please check the rights")
+
+    def test_the_fallback_after_a_failed_fetch_writes_only_name_value_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)  # no origin: git fetch fails with several lines
+            env = dict(os.environ, GITHUB_EVENT_NAME="push", GITHUB_REPOSITORY=REPO, GITHUB_SHA=T)
+            for name in ("GITHUB_EVENT_PATH", "GITHUB_STEP_SUMMARY", "GITHUB_OUTPUT"):
+                env.pop(name, None)
+            out = Path(tmp) / "out.txt"
+            res = subprocess.run([sys.executable, str(Path(r.__file__)), "--base-sha", B, "--output", str(out), "--root", tmp],
+                                 capture_output=True, text=True, env=env)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            lines = out.read_text(encoding="utf-8").splitlines()
+        self.assertIn("mode=fallback", lines)
+        for line in lines:
+            self.assertRegex(line, r"^[a-z_]+=")
