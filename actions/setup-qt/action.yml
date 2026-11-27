@@ -55,7 +55,7 @@ runs:
     # install-qt-action installs its Linux packages with an unguarded `sudo apt-get update && install` that failed whole runs
     # (exit code 100) when the Ubuntu mirror was down. The same list is installed here from a cached package set, with a
     # retry, and the action is told to skip its own install. Only a push to the default branch, a manual run or a schedule
-    # saves the cache; the key names the runner image.
+    # saves the cache; the key names the runner image, or the week.
     - name: Prepare the Qt runtime packages
       id: deps
       if: runner.os == 'Linux' && steps.pins.outputs.version != '' && inputs.host == ''
@@ -66,13 +66,25 @@ runs:
         # Made here, as the runner user: if the install script (root) created ~/.cache first, vcpkg could not make its own directory in it.
         mkdir -p "$HOME/.cache/icl-apt/qt-deps"
 
+    # `${{ env.ImageVersion }}` is empty in an expression (the env context holds only what a workflow sets; on a hosted
+    # ubuntu-24.04 runner the expression gave nothing and the shell variable gave 20261122.23.1), so the key never named an
+    # image. The shell variable is read here. A runner image that has none (a self-hosted fleet's) gets the ISO week: an
+    # entry is renewed every week and is never older than one, where an entry under a fixed key would stay for ever.
+    - name: Name the package cache
+      id: aptkey
+      if: steps.deps.outcome == 'success'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "image=${ImageVersion:-week-$(date -u +%G-%V)}" >> "$GITHUB_OUTPUT"
+
     - name: Restore the package cache
       id: debs
       if: steps.deps.outcome == 'success'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.deps.outputs.debdir }}
-        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-qt-deps-${{ env.ImageVersion }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-qt-deps-${{ steps.aptkey.outputs.image }}
 
     - name: Install the Qt runtime packages
       if: steps.deps.outcome == 'success'
@@ -116,4 +128,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.deps.outputs.debdir }}
-        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-qt-deps-${{ env.ImageVersion }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-qt-deps-${{ steps.aptkey.outputs.image }}

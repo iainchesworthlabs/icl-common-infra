@@ -5,8 +5,10 @@ The install scripts keep the .deb files they download in a directory under $HOME
 save step must run when the marker is there. A `hashFiles()` test of the marker cannot do that: the function reads only
 files under GITHUB_WORKSPACE, so it was always empty and the cache was never saved. These tests check that the action
 tests an output instead, that no `hashFiles` is left in the three, and that the step that sets the output does it."""
+import datetime
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -103,3 +105,194 @@ class SaveStep(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+NAME_STEP = "Name the package cache"
+RESTORE = "Restore the package cache"
+INSTALL_SCRIPTS = {"setup-gcc": "install-gcc.sh", "setup-llvm": "install-llvm.sh", "setup-qt": "install-deps.sh"}
+
+
+def value(step: str, key: str) -> str:
+    """The text after `key:` on its line in a step."""
+    match = re.search(rf"(?m)^\s+{key}: (.*)$", step)
+    assert match, f"no {key} in the step"
+    return match.group(1).strip()
+
+
+def iso_week() -> str:
+    year, week, _ = datetime.datetime.now(datetime.timezone.utc).isocalendar()
+    return f"week-{year}-{week:02d}"
+
+
+class KeyStep(unittest.TestCase):
+    """The key of the package cache names the runner image. `${{ env.ImageVersion }}` is empty in an expression (the env
+    context holds only what a workflow sets, and a probe on a hosted ubuntu-24.04 runner printed [] for it and
+    20261122.23.1 for the shell variable), so the key never named one, and on a runner image with no version at all an
+    entry kept its key for ever. A step reads the shell variable and, when there is none, takes the ISO week."""
+
+    def test_no_key_reads_the_image_from_the_env_context(self):
+        for action in ACTIONS:
+            text = (ROOT / "actions" / action / "action.yml").read_text(encoding="utf-8")
+            code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+            self.assertNotIn("env.ImageVersion", code, action)
+
+    def test_restore_and_save_use_the_name_that_the_step_before_made(self):
+        for action in ACTIONS:
+            by_name = steps(action)
+            names = list(by_name)
+            self.assertIn(NAME_STEP, by_name, action)
+            self.assertIn("id: aptkey", by_name[NAME_STEP], action)
+            self.assertLess(names.index(NAME_STEP), names.index(RESTORE), action)
+            restore_key, save_key = value(by_name[RESTORE], "key"), value(by_name[SAVE], "key")
+            self.assertEqual(restore_key, save_key, action)
+            self.assertIn("steps.aptkey.outputs.image", restore_key, action)
+
+    @unittest.skipUnless(BASH, "needs bash")
+    def test_the_name_is_the_image_version_or_else_the_iso_week(self):
+        for action in ACTIONS:
+            script = script_of(steps(action)[NAME_STEP])
+            for image in ("20261122.23.1", None):
+                with tempfile.TemporaryDirectory() as tmp:
+                    output = Path(tmp) / "github_output"
+                    output.write_text("")
+                    script_file = Path(tmp) / "name.sh"
+                    script_file.write_text(script)
+                    env = {k: v for k, v in os.environ.items() if k != "ImageVersion"}
+                    env["GITHUB_OUTPUT"] = output.as_posix()
+                    if image:
+                        env["ImageVersion"] = image
+                    before = iso_week()
+                    done = subprocess.run([BASH, script_file.as_posix()], env=env, capture_output=True, text=True)
+                    after = iso_week()
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                    lines = output.read_text().split()
+                    if image:
+                        self.assertEqual(lines, [f"image={image}"], action)
+                    else:
+                        self.assertIn(lines, ([f"image={before}"], [f"image={after}"]), action)
+
+
+def install_from_cache_function(action: str) -> str:
+    text = (ROOT / "actions" / action / INSTALL_SCRIPTS[action]).read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^install_from_cache\(\) \{.*?^\}$", text)
+    assert match, f"{action} has no install_from_cache"
+    return match.group(0)
+
+
+@unittest.skipUnless(BASH, "needs bash")
+class InstallFromCache(unittest.TestCase):
+    """What the install scripts do with a restored cache, with a stand-in for apt-get. A set that apt will not install
+    (for one thing a restored cache that holds older packages than the image has, which apt refuses to downgrade with -y)
+    must end in a warning and the network path, and never in a failed job."""
+
+    def run_function(self, action, debs, apt_exit):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            deb_dir = root / "debs"
+            deb_dir.mkdir()
+            for name in debs:
+                (deb_dir / name).write_text("not a package")
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            calls = root / "calls"
+            stub = bin_dir / "apt-get"
+            stub.write_text("#!/usr/bin/env bash\necho \"$*\" >> \"$STUB_CALLS\"\nexit \"$STUB_EXIT\"\n")
+            stub.chmod(0o755)
+            script = root / "run.sh"
+            script.write_text(f'DEB_DIR="$1"\n{install_from_cache_function(action)}\ninstall_from_cache\necho "rc=$?"\n')
+            env = dict(os.environ, STUB_CALLS=calls.as_posix(), STUB_EXIT=str(apt_exit),
+                       PATH=bin_dir.as_posix() + os.pathsep + os.environ["PATH"])
+            done = subprocess.run([BASH, script.as_posix(), deb_dir.as_posix()], env=env, capture_output=True, text=True)
+            return done.stdout, (calls.read_text() if calls.exists() else "")
+
+    def test_a_set_that_apt_will_not_install_falls_back_to_the_network_with_a_warning(self):
+        for action in INSTALL_SCRIPTS:
+            out, calls = self.run_function(action, ["a_1.0_all.deb", "b_1.0_all.deb"], apt_exit=100)
+            self.assertIn("rc=1", out, action)
+            self.assertIn("::warning title=apt-get::the cached packages did not install; using the network", out, action)
+            self.assertIn("a_1.0_all.deb", calls, action)
+
+    def test_a_set_that_installs_is_used(self):
+        for action in INSTALL_SCRIPTS:
+            out, calls = self.run_function(action, ["a_1.0_all.deb"], apt_exit=0)
+            self.assertIn("rc=0", out, action)
+            self.assertNotIn("::warning", out, action)
+            self.assertIn("a_1.0_all.deb", calls, action)
+
+    def test_no_cached_packages_means_the_network_without_calling_apt(self):
+        for action in INSTALL_SCRIPTS:
+            out, calls = self.run_function(action, [], apt_exit=0)
+            self.assertIn("rc=1", out, action)
+            self.assertEqual(calls, "", action)
+
+
+def privileged():
+    """The command prefix that runs something as root here, or None where nothing can (and where the test is not asked for)."""
+    if os.environ.get("ICL_TEST_REAL_APT") != "1" or not sys.platform.startswith("linux"):
+        return None
+    for tool in ("dpkg-deb", "dpkg", "apt-get", "bash"):
+        if not shutil.which(tool):
+            return None
+    if os.geteuid() == 0:
+        return []
+    return ["sudo", "-n"] if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0 else None
+
+
+ROOT_PREFIX = privileged()
+
+
+@unittest.skipIf(ROOT_PREFIX is None, "installs a dummy package as root: set ICL_TEST_REAL_APT=1 on a Linux box with root or sudo -n")
+class InstallFromCacheWithRealApt(unittest.TestCase):
+    """The same function against the real apt-get and dpkg, with two versions of one dummy package: a restored cache that
+    holds an older package than the one installed (the image has moved on) must not downgrade it or break the job, and
+    one that holds a newer package must install. The hosted runners of this repository's CI have root without a
+    password; the package is removed again."""
+
+    PACKAGE = "icl-test-apt-cache"
+
+    def build(self, tmp: Path, version: str) -> Path:
+        tree = tmp / f"tree-{version}"
+        (tree / "DEBIAN").mkdir(parents=True)
+        (tree / "DEBIAN" / "control").write_text(
+            f"Package: {self.PACKAGE}\nVersion: {version}\nArchitecture: all\nMaintainer: Test <test@example.invalid>\n"
+            "Description: Made by scripts/tests/test_apt_cache_save.py, safe to remove.\n")
+        deb = tmp / f"{self.PACKAGE}_{version}_all.deb"
+        subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(tree), str(deb)], check=True, capture_output=True)
+        return deb
+
+    def as_root(self, *command):
+        return subprocess.run([*ROOT_PREFIX, *command], capture_output=True, text=True)
+
+    def installed(self) -> str:
+        done = subprocess.run(["dpkg-query", "-W", "-f=${Version}", self.PACKAGE], capture_output=True, text=True)
+        return done.stdout if done.returncode == 0 else ""
+
+    def run_function(self, tmp: Path, cached: Path) -> str:
+        deb_dir = tmp / "cache"
+        deb_dir.mkdir(exist_ok=True)
+        for old in deb_dir.glob("*.deb"):
+            old.unlink()
+        shutil.copy(cached, deb_dir)
+        deb_dir.chmod(0o755)
+        script = tmp / "run.sh"
+        script.write_text(f'DEB_DIR="$1"\n{install_from_cache_function("setup-gcc")}\ninstall_from_cache\necho "rc=$?"\n')
+        done = self.as_root("bash", str(script), str(deb_dir))
+        return done.stdout + done.stderr
+
+    def test_older_cached_packages_do_not_downgrade_the_image_and_newer_ones_install(self):
+        self.addCleanup(self.as_root, "dpkg", "--purge", self.PACKAGE)
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            tmp.chmod(0o755)
+            older, newer = self.build(tmp, "1.0"), self.build(tmp, "2.0")
+            self.assertEqual(self.as_root("dpkg", "-i", str(newer)).returncode, 0)
+            self.assertEqual(self.installed(), "2.0")
+            out = self.run_function(tmp, older)
+            self.assertEqual(self.installed(), "2.0", out)  # not downgraded
+            self.assertIn("rc=1", out)  # apt refused, so the install goes to the network
+            self.assertIn("::warning title=apt-get::the cached packages did not install; using the network", out)
+            self.assertEqual(self.as_root("dpkg", "-i", str(older)).returncode, 0)  # the image has the older one now
+            self.assertEqual(self.installed(), "1.0")
+            out = self.run_function(tmp, newer)
+            self.assertIn("rc=0", out)
+            self.assertEqual(self.installed(), "2.0", out)

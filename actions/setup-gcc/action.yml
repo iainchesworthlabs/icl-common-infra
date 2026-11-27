@@ -35,14 +35,26 @@ runs:
 
     # The installed packages are cached, so a job installs without apt-get update or a download from the mirrors
     # (apt.llvm.org and archive.ubuntu.com failed whole runs on 10 November 2026). Only a push to the default branch,
-    # a manual run or a schedule saves it; the key names the runner image, because a new image changes the dependencies.
+    # a manual run or a schedule saves it; the key names the runner image, or the week, because a new image changes the dependencies.
+    # `${{ env.ImageVersion }}` is empty in an expression (the env context holds only what a workflow sets; on a hosted
+    # ubuntu-24.04 runner the expression gave nothing and the shell variable gave 20261122.23.1), so the key never named an
+    # image. The shell variable is read here. A runner image that has none (a self-hosted fleet's) gets the ISO week: an
+    # entry is renewed every week and is never older than one, where an entry under a fixed key would stay for ever.
+    - name: Name the package cache
+      id: aptkey
+      if: runner.os == 'Linux' && steps.pin.outputs.version != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "image=${ImageVersion:-week-$(date -u +%G-%V)}" >> "$GITHUB_OUTPUT"
+
     - name: Restore the package cache
       id: debs
       if: runner.os == 'Linux' && steps.pin.outputs.version != ''
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.pin.outputs.debdir }}
-        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.pin.outputs.version }}-${{ env.ImageVersion }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.pin.outputs.version }}-${{ steps.aptkey.outputs.image }}
 
     - name: Install GCC
       id: install
@@ -81,4 +93,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.pin.outputs.debdir }}
-        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.pin.outputs.version }}-${{ env.ImageVersion }}
+        key: apt-debs-${{ runner.os }}-${{ runner.arch }}-gcc-${{ steps.pin.outputs.version }}-${{ steps.aptkey.outputs.image }}

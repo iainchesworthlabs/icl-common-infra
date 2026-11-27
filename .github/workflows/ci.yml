@@ -35,6 +35,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run the tests
+        env:
+          # The hosted runner has root without a password: scripts/tests/test_apt_cache_save.py installs a dummy package with the real apt.
+          ICL_TEST_REAL_APT: "1"
         run: python3 -m unittest discover -s scripts/tests -v
 
   cmake:
