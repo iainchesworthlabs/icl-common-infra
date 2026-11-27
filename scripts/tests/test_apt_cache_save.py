@@ -8,6 +8,7 @@ tests an output instead, that no `hashFiles` is left in the three, and that the 
 import datetime
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -223,3 +224,75 @@ class InstallFromCache(unittest.TestCase):
             out, calls = self.run_function(action, [], apt_exit=0)
             self.assertIn("rc=1", out, action)
             self.assertEqual(calls, "", action)
+
+
+def privileged():
+    """The command prefix that runs something as root here, or None where nothing can (and where the test is not asked for)."""
+    if os.environ.get("ICL_TEST_REAL_APT") != "1" or not sys.platform.startswith("linux"):
+        return None
+    for tool in ("dpkg-deb", "dpkg", "apt-get", "bash"):
+        if not shutil.which(tool):
+            return None
+    if os.geteuid() == 0:
+        return []
+    return ["sudo", "-n"] if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0 else None
+
+
+ROOT_PREFIX = privileged()
+
+
+@unittest.skipIf(ROOT_PREFIX is None, "installs a dummy package as root: set ICL_TEST_REAL_APT=1 on a Linux box with root or sudo -n")
+class InstallFromCacheWithRealApt(unittest.TestCase):
+    """The same function against the real apt-get and dpkg, with two versions of one dummy package: a restored cache that
+    holds an older package than the one installed (the image has moved on) must not downgrade it or break the job, and
+    one that holds a newer package must install. The hosted runners of this repository's CI have root without a
+    password; the package is removed again."""
+
+    PACKAGE = "icl-test-apt-cache"
+
+    def build(self, tmp: Path, version: str) -> Path:
+        tree = tmp / f"tree-{version}"
+        (tree / "DEBIAN").mkdir(parents=True)
+        (tree / "DEBIAN" / "control").write_text(
+            f"Package: {self.PACKAGE}\nVersion: {version}\nArchitecture: all\nMaintainer: Test <test@example.invalid>\n"
+            "Description: Made by scripts/tests/test_apt_cache_save.py, safe to remove.\n")
+        deb = tmp / f"{self.PACKAGE}_{version}_all.deb"
+        subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(tree), str(deb)], check=True, capture_output=True)
+        return deb
+
+    def as_root(self, *command):
+        return subprocess.run([*ROOT_PREFIX, *command], capture_output=True, text=True)
+
+    def installed(self) -> str:
+        done = subprocess.run(["dpkg-query", "-W", "-f=${Version}", self.PACKAGE], capture_output=True, text=True)
+        return done.stdout if done.returncode == 0 else ""
+
+    def run_function(self, tmp: Path, cached: Path) -> str:
+        deb_dir = tmp / "cache"
+        deb_dir.mkdir(exist_ok=True)
+        for old in deb_dir.glob("*.deb"):
+            old.unlink()
+        shutil.copy(cached, deb_dir)
+        deb_dir.chmod(0o755)
+        script = tmp / "run.sh"
+        script.write_text(f'DEB_DIR="$1"\n{install_from_cache_function("setup-gcc")}\ninstall_from_cache\necho "rc=$?"\n')
+        done = self.as_root("bash", str(script), str(deb_dir))
+        return done.stdout + done.stderr
+
+    def test_older_cached_packages_do_not_downgrade_the_image_and_newer_ones_install(self):
+        self.addCleanup(self.as_root, "dpkg", "--purge", self.PACKAGE)
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            tmp.chmod(0o755)
+            older, newer = self.build(tmp, "1.0"), self.build(tmp, "2.0")
+            self.assertEqual(self.as_root("dpkg", "-i", str(newer)).returncode, 0)
+            self.assertEqual(self.installed(), "2.0")
+            out = self.run_function(tmp, older)
+            self.assertEqual(self.installed(), "2.0", out)  # not downgraded
+            self.assertIn("rc=1", out)  # apt refused, so the install goes to the network
+            self.assertIn("::warning title=apt-get::the cached packages did not install; using the network", out)
+            self.assertEqual(self.as_root("dpkg", "-i", str(older)).returncode, 0)  # the image has the older one now
+            self.assertEqual(self.installed(), "1.0")
+            out = self.run_function(tmp, newer)
+            self.assertIn("rc=0", out)
+            self.assertEqual(self.installed(), "2.0", out)
