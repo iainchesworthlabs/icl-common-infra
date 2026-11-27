@@ -17,11 +17,16 @@ everything the other conditions leave. Default phases:
 For a phase that fails, the failed test names are read from
 Testing/Temporary/LastTestsFailed.log and re-run once, one at a time, with
 `ctest --tests-from-file` (never --rerun-failed, which depends on state that a
-concurrent phase can overwrite). A test that fails and then passes is reported as a
+concurrent phase can overwrite). The list is <build-dir>/rerun-<phase>.txt, named by an
+absolute path: ctest changes into --test-dir before it opens the list, so a path
+relative to the working directory, which is what --build-dir usually is, would not be
+found. A test that fails and then passes is reported as a
 flaky pass (warning, exit 0). A test that fails twice fails the run. The run also fails
-if the re-run did not run exactly the tests that failed. A phase that matches no tests
-is a failure unless it is optional ("optional": true), because a mistyped label would
-otherwise pass with nothing run.
+if the re-run did not run exactly the tests that failed, or did not run at all: the
+failure log of the first run is removed before the re-run, because ctest leaves it as it
+was when it cannot start, and it would be read as a second failure. A phase that matches
+no tests is a failure unless it is optional ("optional": true), because a mistyped label
+would otherwise pass with nothing run.
 
 Exit status 0 on success, 1 on any real failure.
 """
@@ -55,6 +60,12 @@ def failed_names(build_dir: Path) -> list[str]:
     return names
 
 
+def clear_failed_log(build_dir: Path) -> None:
+    """Remove LastTestsFailed.log. ctest rewrites it only when a test fails, so one that is left over from an
+    earlier run would be read as the failures of the run after it."""
+    (build_dir / "Testing" / "Temporary" / "LastTestsFailed.log").unlink(missing_ok=True)
+
+
 def ctest_cmd(ctest: str, build_dir: Path, config: str, jobs: int, extra: list[str]) -> list[str]:
     cmd = [ctest, "--test-dir", str(build_dir), "--output-on-failure", "--no-tests=error", "-j", str(jobs or os.cpu_count() or 1)]
     if config:
@@ -80,9 +91,10 @@ def run_phase(phase: dict, args, summary: list[str]) -> tuple[bool, list[str]]:
             return True, []
         summary.append(f"- {phase['name']}: FAILED with no recorded failing tests (build or configuration problem)")
         return False, []
-    list_file = build_dir / f"rerun-{phase['name']}.txt"
+    list_file = (build_dir / f"rerun-{phase['name']}.txt").resolve()
     list_file.write_text("\n".join(names) + "\n", encoding="utf-8")
     print(f"::warning::{phase['name']}: {len(names)} failed; re-running by name: {', '.join(names)}")
+    clear_failed_log(build_dir)
     rerun = subprocess.run(ctest_cmd(args.ctest, build_dir, args.config, 1, ["--tests-from-file", str(list_file)]))
     still = failed_names(build_dir) if rerun.returncode != 0 else []
     if rerun.returncode != 0 and not still:

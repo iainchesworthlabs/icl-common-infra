@@ -444,7 +444,10 @@ asset cache and `X_VCPKG_ASSET_SOURCES` is not set. On a binary-cache hit vcpkg 
 ## Tests in phases
 
 `actions/run-ctest` runs CTest in phases, re-runs the tests that failed once, by name, and reports a test that failed and
-then passed as a flaky pass (a warning, not a failure). A test that fails twice fails the run. The default phases suit a
+then passed as a flaky pass (a warning, not a failure). A test that fails twice fails the run, and so does a re-run that
+cannot start (the summary says so, and does not call it a second failure). The failed names go to `<build-dir>/rerun-<phase>.txt`
+and are re-run from it by `ctest --tests-from-file` with an absolute path, so `build-dir` may be relative to the working
+directory, as `build/<preset>` is. The default phases suit a
 project whose labels are `unit`, `integration`, `system`, `ui` and `perf`. A project with other labels gives its own
 `phases-file` (JSON): each phase has a `name`, a `label` (a regular expression for `ctest -L`, or empty), `jobs` (0 for
 all cores) and optionally `optional` (a phase that matches nothing is not an error), `exclude` (a regular expression for
