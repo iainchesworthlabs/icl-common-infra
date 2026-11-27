@@ -82,9 +82,12 @@ def strip_comments_and_strings(text: str) -> str:
             out.append('"')
             i += 1
             while i < n and text[i] != '"' and text[i] != "\n":
+                if text[i] == "\\" and i + 1 < n and text[i + 1] == "\n":
+                    out.append("\n")  # a string continued over a line keeps the break
                 i += 2 if text[i] == "\\" else 1
             out.append('"')
-            i += 1
+            if i < n and text[i] == '"':
+                i += 1  # the closing quote; a line break that ended the string is left for the next turn of the loop
         else:
             out.append(c)
             i += 1
