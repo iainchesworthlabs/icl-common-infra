@@ -146,6 +146,48 @@ class Plan(unittest.TestCase):
         self.assertIn("| vcpkg:Linux-X64 | 1 | 1 MB |", done.stdout)
         self.assertIn("| vcpkg:Linux-X64-qt | 1 | 1 MB |", done.stdout)
 
+    def test_older_generations_of_an_apt_package_cache_are_superseded_per_kind(self):
+        # apt-debs-<OS>-<ARCH>-<gcc-N | llvm-N | qt-deps>-<discriminator>: a restore asks for one exact key, so once the
+        # discriminator has moved (an image version, a week, none at all on the keys of v0.1.34) the older entries of the
+        # kind restore for nobody. The newest of each kind stays, per ref.
+        keys = {
+            "llvm-old": "apt-debs-Linux-X64-llvm-23-",
+            "llvm-w47": "apt-debs-Linux-X64-llvm-23-week-2026-47",
+            "llvm-w48": "apt-debs-Linux-X64-llvm-23-week-2026-48",
+            "gcc-image": "apt-debs-Linux-X64-gcc-16-20260518.1.0",
+            "qt-old": "apt-debs-Linux-X64-qt-deps-",
+            "qt-w48": "apt-debs-Linux-X64-qt-deps-week-2026-48",
+            "llvm-24": "apt-debs-Linux-X64-llvm-24-week-2026-48",
+        }
+        done = self.run_plan(
+            [
+                cache(1, keys["llvm-old"], "refs/heads/develop", "2026-11-20T00:00:00Z"),
+                cache(2, keys["llvm-w47"], "refs/heads/develop", "2026-11-23T00:00:00Z"),
+                cache(3, keys["llvm-w48"], "refs/heads/develop", "2026-11-30T00:00:00Z"),
+                cache(4, keys["gcc-image"], "refs/heads/develop", "2026-11-20T00:00:00Z"),
+                cache(5, keys["qt-old"], "refs/heads/develop", "2026-11-20T00:00:00Z"),
+                cache(6, keys["qt-w48"], "refs/heads/develop", "2026-11-30T00:00:00Z"),
+                cache(7, keys["llvm-24"], "refs/heads/develop", "2026-11-30T00:00:00Z"),
+                cache(8, keys["llvm-w47"], "refs/heads/other", "2026-11-23T00:00:00Z"),
+            ],
+            ["refs/heads/develop", "refs/heads/other"],
+            "--grace-minutes",
+            "0",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(
+            sorted((r[0], r[1], r[2]) for r in self.dropped(done.stdout)),
+            sorted(
+                [
+                    ("superseded", "refs/heads/develop", keys["llvm-old"]),
+                    ("superseded", "refs/heads/develop", keys["llvm-w47"]),
+                    ("superseded", "refs/heads/develop", keys["qt-old"]),
+                ]
+            ),
+        )
+        self.assertIn("| apt-debs:Linux-X64-llvm-23 | 2 |", done.stdout)  # the newest on develop and the one of the other branch
+        self.assertIn("| apt-debs:Linux-X64-gcc-16 | 1 |", done.stdout)
+
     def test_purge_prefix_goes_on_every_ref(self):
         done = self.run_plan(
             [
