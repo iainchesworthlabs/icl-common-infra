@@ -135,7 +135,7 @@ def family:
     elif ($k | test("^vcpkg-tool-[A-Za-z0-9]+-[A-Za-z0-9]+-"))
       then ($k | capture("^vcpkg-tool-(?<os>[A-Za-z0-9]+)-(?<arch>[A-Za-z0-9]+)-") | "vcpkg-tool:" + .os + "-" + .arch)
     elif ($k | test("^vcpkg(-downloads)?-[A-Za-z0-9]+-[A-Za-z0-9]+-[0-9a-f]{40}-[0-9a-f]{64}"))
-      then ($k | capture("^(?<kind>vcpkg(?:-downloads)?)-(?<os>[A-Za-z0-9]+)-(?<arch>[A-Za-z0-9]+)-[0-9a-f]{40}-[0-9a-f]{64}(?:-(?<suffix>.+?))?(?:-[0-9a-f]{16})?$")
+      then ($k | capture("^(?<kind>vcpkg(?:-downloads)?)-(?<os>[A-Za-z0-9]+)-(?<arch>[A-Za-z0-9]+)-[0-9a-f]{40}-[0-9a-f]{64}(?:-(?<suffix>(?![0-9a-f]{16}$).+?))?(?:-[0-9a-f]{16})?$")
             | .kind + ":" + .os + "-" + .arch + (if .suffix then "-" + .suffix else "" end))
     elif ($k | test("^vcpkg-downloads-[0-9a-f]{40}-[0-9a-f]{64}"))
       then "vcpkg-downloads"
