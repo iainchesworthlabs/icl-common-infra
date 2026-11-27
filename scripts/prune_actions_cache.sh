@@ -39,6 +39,8 @@
 #        ccache-<job>-<OS>-<ARCH>-<40 hex>            ICL Forge
 #        install-qt-action-<os>-...-<desktop|android|ios>-...
 #        cache-trivy-<date>                           aqualink-automate
+#        apt-debs-<OS>-<ARCH>-<gcc-N|llvm-N|qt-deps>-<image version | week-<ISO week> | nothing>
+#                                                     setup-gcc, setup-llvm, setup-qt (the .deb files of an install)
 #   3. Anything matching --purge PREFIX, on every ref. This is the manual reset
 #      for a vcpkg cache that has carried stale archives for too long: archives
 #      are never garbage-collected, because vcpkg has no notion of "no longer
@@ -144,6 +146,9 @@ def family:
     elif ($k | test("^install-qt-action-"))
       then (($k | capture("^install-qt-action-(?<os>[a-z0-9_]+)-.*?-(?<target>desktop|android|ios)-")? // null)
             | if . then "qt:" + .os + ":" + .target else null end)
+    elif ($k | test("^apt-debs-[A-Za-z0-9]+-[A-Za-z0-9]+-(gcc-[0-9]+|llvm-[0-9]+|qt-deps)-"))
+      then ($k | capture("^apt-debs-(?<os>[A-Za-z0-9]+)-(?<arch>[A-Za-z0-9]+)-(?<kind>gcc-[0-9]+|llvm-[0-9]+|qt-deps)-")
+            | "apt-debs:" + .os + "-" + .arch + "-" + .kind)
     elif ($k | test("^cache-trivy-[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
       then "trivy"
     else null end;

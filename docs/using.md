@@ -410,7 +410,7 @@ A repository's Actions cache is 10 GB, and GitHub evicts the least recently used
 which took an hour to build. The `actions/prune-actions-cache` composite action keeps the quota for entries something can
 still restore: it deletes those of a ref that no longer exists (a deleted branch, a closed pull request, a deleted tag),
 and the older generations of a cache that is saved under a new key whenever its content changes (vcpkg binaries, ccache,
-the Qt kit), keeping the newest of each family per ref. `purge` deletes every entry whose key starts with a prefix, the
+the Qt kit, the apt package caches of `setup-gcc`, `setup-llvm` and `setup-qt`), keeping the newest of each family per ref. `purge` deletes every entry whose key starts with a prefix, the
 reset for a vcpkg cache that has carried stale archives too long. `dry-run: "true"` only lists.
 
 The triggers are the caller's, in a workflow of its own with `permissions: actions: write` on the job: `pull_request`
